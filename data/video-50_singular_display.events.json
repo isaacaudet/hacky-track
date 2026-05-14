@@ -1,0 +1,154 @@
+{
+  "source_video": "video-50_singular_display.MOV",
+  "annotation_method": "Audio transient candidates plus frame-level visual verification. User correction removed a duplicated second-rally early contact and identified the missed late contact around 8.57s.",
+  "rallies": [
+    {
+      "id": 1,
+      "label": "first rally",
+      "start_sec": 0.78,
+      "end_sec": 2.02,
+      "expected_touches": 2,
+      "expected_stalls": 0,
+      "events": [
+        {
+          "type": "touch",
+          "touch_number": 1,
+          "time_sec": 0.80,
+          "label": "right foot touch",
+          "confidence": "high",
+          "note": "Bag is on/at the extended foot and audio has a transient."
+        },
+        {
+          "type": "touch",
+          "touch_number": 2,
+          "time_sec": 1.48,
+          "label": "second foot touch",
+          "confidence": "medium",
+          "note": "Visually closest foot contact in the first rally before the reset."
+        },
+        {
+          "type": "drop_floor",
+          "time_sec": 2.02,
+          "label": "floor reset",
+          "confidence": "high",
+          "note": "Bag is down on the floor after the two-touch rally."
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "label": "second rally",
+      "start_sec": 3.96,
+      "end_sec": 9.51,
+      "expected_touches": 8,
+      "expected_stalls": 0,
+      "events": [
+        {
+          "type": "touch",
+          "touch_number": 1,
+          "time_sec": 4.00,
+          "label": "toe touch",
+          "confidence": "high",
+          "note": "Clear foot contact near the first audio peak of the rally."
+        },
+        {
+          "type": "touch",
+          "touch_number": 2,
+          "time_sec": 4.63,
+          "label": "quick touch",
+          "confidence": "medium",
+          "note": "Quick early touch. The earlier 4.50s candidate was removed as a duplicate of this contact."
+        },
+        {
+          "type": "touch",
+          "touch_number": 3,
+          "time_sec": 5.27,
+          "label": "toe touch",
+          "confidence": "high",
+          "note": "Bag reaches the foot and rebounds upward."
+        },
+        {
+          "type": "touch",
+          "touch_number": 4,
+          "time_sec": 5.92,
+          "label": "toe touch",
+          "confidence": "high",
+          "note": "Foot contact aligns with a strong audio transient."
+        },
+        {
+          "type": "touch",
+          "touch_number": 5,
+          "time_sec": 6.57,
+          "label": "toe touch",
+          "confidence": "medium",
+          "note": "Bag is low and close to the foot; audio transient supports contact."
+        },
+        {
+          "type": "touch",
+          "touch_number": 6,
+          "time_sec": 7.15,
+          "label": "toe touch",
+          "confidence": "medium",
+          "note": "Visual contact is clearer around 7.10-7.17s; nearby audio candidates bracket it."
+        },
+        {
+          "type": "touch",
+          "touch_number": 7,
+          "time_sec": 8.00,
+          "label": "late touch",
+          "confidence": "high",
+          "note": "Foot sends the bag upward/right; this is not the final contact."
+        },
+        {
+          "type": "touch",
+          "touch_number": 8,
+          "time_sec": 8.57,
+          "label": "final touch before drop",
+          "confidence": "high",
+          "note": "Previously missed late contact; frames around 8.54-8.60s show the bag at the foot before the reset."
+        },
+        {
+          "type": "drop_floor",
+          "time_sec": 9.51,
+          "label": "floor reset",
+          "confidence": "high",
+          "note": "Bag is back down near the floor after the late touch; rally resets here."
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "label": "third rally",
+      "start_sec": 11.70,
+      "end_sec": 14.20,
+      "expected_touches": 2,
+      "expected_stalls": 1,
+      "events": [
+        {
+          "type": "touch",
+          "touch_number": 1,
+          "time_sec": 11.74,
+          "label": "first touch",
+          "confidence": "high",
+          "note": "Bag reaches the foot and rebounds; audio transient is nearby."
+        },
+        {
+          "type": "touch",
+          "touch_number": 2,
+          "time_sec": 12.47,
+          "label": "second touch",
+          "confidence": "high",
+          "note": "Clear foot contact before the stall setup."
+        },
+        {
+          "type": "stall",
+          "time_sec": 13.10,
+          "label": "toe stall",
+          "confidence": "high",
+          "duration_sec": 1.10,
+          "note": "Audio setup transient is around 12.86s; the bag visibly settles on the foot around 13.10s and remains controlled until roughly 14.20s."
+        }
+      ]
+    }
+  ]
+}
