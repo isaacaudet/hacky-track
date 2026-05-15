@@ -1,54 +1,94 @@
-# Hacky Track MVP
+# Hacky Track
 
-Hacky Track is a small computer-vision/audio prototype for turning first-person footbag footage into a rally timeline: touches, drops, stalls, counts, proof frames, and annotated videos.
+<p align="center">
+  <img src="assets/readme/hacky-track-demo.gif" width="360" alt="Hacky Track HUD demo">
+</p>
 
-The current implementation is intentionally narrow. It was built around one Meta Glasses clip, `video-50_singular_display.MOV`, where a simple "count the kicks" request becomes surprisingly tricky once you try to make the result auditable.
+<p align="center">
+  <strong>POV footbag analytics for Meta Glasses footage.</strong><br>
+  Track rallies, touches, stalls, trick labels, and sketchy little HUD overlays from first-person video.
+</p>
 
-## The Problem
+---
 
-Footbag rally tracking looks easy to a person watching the clip, but it is awkward for a naive video script:
+## What This Is
 
-- The bag is small, fast, and often motion-blurred.
-- First-person camera motion makes object tracking unstable.
-- The foot and bag can overlap for only a few frames.
-- Audio spikes are useful contact clues, but footsteps, floor hits, and duplicated rebounds create false positives.
-- A rally is not just a stream of contacts. The system also needs to understand floor resets, final drops, and stalls where the bag is controlled instead of kicked.
-- The output has to be explainable. A raw count is not enough if a user thinks the tracker duplicated or missed a touch.
+Hacky Track is an experimental computer-vision and audio pipeline for turning first-person footbag footage into an annotated rally video.
 
-This repo captures an MVP answer to that problem: use audio transients to propose likely contact times, keep a checked event file as the source of truth, and render visual artifacts that make the count easy to inspect.
+The current demo renders a hand-drawn HUD over Meta Glasses footage with:
 
-For the included annotation file, the clip contains:
+- live touch count
+- rally timeline
+- touch impact ticks near the footbag
+- stall and around-the-world popups
+- a move feed such as `RIGHT KICK`, `LEFT KICK`, `RIGHT STALL`, `AROUND THE WORLD`, `OUTER RIGHT`, and `OUTER LEFT`
+- reusable MS Paint-style sprite assets
 
-- Rally 1: 2 touches, then a floor reset.
-- Rally 2: 8 touches, then a floor reset.
-- Rally 3: 2 touches, then a toe stall.
+The goal is not just to count touches. The goal is to make the count explainable enough that a player can tell what the tracker thinks happened.
 
-## What It Does
+## Current Demo
 
-`hacky_mvp.py` takes a local video and a checked event JSON file, then generates:
+The README GIF is generated from the latest HUD render:
 
-- `rally_events.json`: structured event data enriched with nearest audio peak timing.
-- `rally_events.csv`: spreadsheet-friendly event table.
-- `event_sheet.jpg`: proof-frame contact sheet for the labeled events.
-- `annotated_rallies.mp4`: video with event labels and a timeline.
-- `hud_overlay.mp4`: richer HUD overlay with live rally count, total touches, best rally, event flashes, stall state, and timeline markers.
+```text
+outputs/video-506_singular_display/video506_corrected_paint_hud_overlay.mp4
+```
 
-## How It Works
+That source MP4 is intentionally ignored by Git because it is large. The lightweight README GIF lives at:
 
-1. Extract mono audio from the input video with `ffmpeg`.
-2. Compute short-window RMS energy and robust z-scores.
-3. Detect transient peaks as contact candidates.
-4. Load checked rally annotations from `data/video-50_singular_display.events.json`.
-5. Attach nearest audio-peak evidence to each checked event.
-6. Render JSON, CSV, proof sheet, annotated video, and HUD video outputs.
+```text
+assets/readme/hacky-track-demo.gif
+```
 
-The MVP does not yet infer every event end-to-end from vision alone. The checked event file is deliberately explicit because the goal of this version is to create an auditable workflow and a clear target for future automation.
+For the current demo clip, the event timeline is manually corrected:
 
-## Requirements
+- 19 touches
+- 1 right stall
+- 1 around-the-world segment
+- a hand-authored move feed for the top HUD
 
-- Python 3.11+
-- `ffmpeg` available on your `PATH`
-- Python packages in `requirements.txt`
+## Why It Is Hard
+
+POV footbag tracking has a bunch of annoying edge cases:
+
+- the bag is small, fast, and often motion-blurred
+- camera motion is constant
+- a foot, knee, hand, or grass patch can hide the bag
+- audio spikes help, but floor bounces and footsteps can look like touches
+- a rally reset is different from a kick
+- a stall is different from a kick
+- an around-the-world is a time window, not just one impact frame
+
+So the MVP uses a practical workflow: detect candidates, review them, correct them, and render outputs that make mistakes obvious.
+
+## Pipeline
+
+```mermaid
+flowchart LR
+  A["Meta Glasses video"] --> B["Audio peaks"]
+  A --> C["Footbag tracking"]
+  B --> D["Candidate touches"]
+  C --> D
+  D --> E["Human review"]
+  E --> F["Corrected event JSON"]
+  F --> G["HUD renderer"]
+  G --> H["Annotated video"]
+  G --> I["Sprite assets"]
+```
+
+## Main Scripts
+
+| Script | Purpose |
+| --- | --- |
+| `hacky_mvp.py` | Original checked-event MVP: JSON, CSV, proof frames, annotated video. |
+| `paint_hud.py` | Generates the reusable hand-drawn HUD sprite sheet and shared renderer helpers. |
+| `render_video506_hud.py` | Current demo renderer for the corrected video-506 HUD. |
+| `scan_training_data.py` | Scans raw clips into reviewable candidate touch data. |
+| `train_multimodal_detector.py` | Trains/runs a weak visual/audio candidate detector. |
+| `review_app.py` | Local web app for approving, rejecting, and adding touch candidates. |
+| `detect_atw_overlay.py` | Experimental footbag/foot heuristic for around-the-world detection. |
+
+## Quickstart
 
 Install dependencies:
 
@@ -58,57 +98,105 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-On macOS, install `ffmpeg` with Homebrew if needed:
+Install `ffmpeg` if needed:
 
 ```bash
 brew install ffmpeg
 ```
 
-## Usage
-
-Put the source clip somewhere local. The video itself is not committed to this repo.
+Render the current demo HUD:
 
 ```bash
-python3 hacky_mvp.py /path/to/video-50_singular_display.MOV
+python3 render_video506_hud.py /path/to/video-506_singular_display.MOV --scale 0.5
 ```
 
-Optional flags:
+Generate the README GIF from the rendered MP4:
 
 ```bash
-python3 hacky_mvp.py /path/to/video.MOV \
-  --events data/video-50_singular_display.events.json \
-  --out outputs/video-50_singular_display \
-  --scale 0.5
+ffmpeg -hide_banner -loglevel error -y \
+  -i outputs/video-506_singular_display/video506_corrected_paint_hud_overlay.mp4 \
+  -filter_complex "[0:v]fps=7,scale=320:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=64:reserve_transparent=0[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5" \
+  -loop 0 assets/readme/hacky-track-demo.gif
 ```
 
-The script prints a rally summary and writes generated artifacts under `outputs/`.
+Run the review app:
 
-## Repository Layout
+```bash
+python3 review_app.py
+```
+
+Then open:
 
 ```text
-.
-├── data/
-│   └── video-50_singular_display.events.json
-├── hacky_mvp.py
-├── requirements.txt
-└── README.md
+http://127.0.0.1:8765/
 ```
 
-Generated media and local input videos are ignored by Git.
+## Sprite Sheet
 
-## Current Limitations
+The HUD style comes from generated transparent PNG assets under:
 
-- It is tuned to one known clip and one annotation file.
-- The input event JSON is still human-checked ground truth, not a fully automatic detector.
-- Audio transients help find contacts, but they are not reliable enough alone for final event labeling.
-- The script assumes the checked events use the same timeline as the input video.
-- There is no model-based bag detector or pose tracker yet.
+```text
+assets/ms_paint_hud/
+```
 
-## Future Directions
+This includes:
 
-- Add automatic bag detection and short-horizon tracking.
-- Fuse pose, optical flow, and audio peaks for better contact confidence.
-- Add a review UI for accepting/rejecting candidate touches.
-- Generalize rally segmentation across arbitrary clips.
-- Export highlight clips for each rally.
-- Add tests around event summarization and audio-peak matching.
+- counter panels
+- digit sprites
+- move labels
+- pips
+- stall badges
+- around-the-world badges
+- custom star/tick effects
+
+The roughness is intentional. The target style is playful, hand-drawn, and a little broken in a good way.
+
+## Data Model
+
+Checked events are stored as JSON under `data/`. A rally event can include:
+
+- `touch`
+- `stall`
+- `drop_floor`
+- special event windows such as `around_the_world`
+
+The current demo uses:
+
+```text
+data/video-506_singular_display.events.json
+```
+
+That file is the source of truth for the corrected render.
+
+## Status
+
+This is still an MVP.
+
+What works:
+
+- auditable event timelines
+- HUD rendering
+- reusable sprite assets
+- local review workflow
+- rough candidate detection experiments
+
+What is still in progress:
+
+- robust automatic footbag tracking
+- reliable kick classification
+- automatic stall detection
+- automatic around-the-world recognition
+- generalization across lots of POV clips
+
+## Direction
+
+The next real milestone is a better model loop:
+
+1. Gather more Meta Glasses clips.
+2. Track the footbag frame by frame.
+3. Use audio only as supporting evidence, not the whole detector.
+4. Review and correct candidates quickly.
+5. Train from approved/rejected touches.
+6. Render the HUD from structured, explainable events.
+
+The end state is a lightweight POV sports HUD for footbag: count the rally, identify the trick, show the proof, and keep the edit fun.

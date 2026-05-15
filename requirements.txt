@@ -1,2 +1,5 @@
 numpy>=1.26
 opencv-python>=4.9
+Pillow>=10.0
+scikit-learn>=1.4
+joblib>=1.3

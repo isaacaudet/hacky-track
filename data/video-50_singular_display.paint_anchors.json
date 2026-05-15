@@ -1,0 +1,21 @@
+{
+  "coordinate_space": "normalized_frame",
+  "notes": "Hand-checked effect anchor points for the rough paint HUD. Coordinates are normalized x/y positions in the rendered frame and are used only to place minimal touch/stall visual effects.",
+  "anchors": [
+    { "key": "r1:touch:1:0.80", "x": 0.592, "y": 0.648 },
+    { "key": "r1:touch:2:1.48", "x": 0.597, "y": 0.826 },
+    { "key": "r1:drop_floor:0:2.02", "x": 0.351, "y": 0.698 },
+    { "key": "r2:touch:1:4.00", "x": 0.555, "y": 0.737 },
+    { "key": "r2:touch:2:4.63", "x": 0.567, "y": 0.744 },
+    { "key": "r2:touch:3:5.27", "x": 0.579, "y": 0.727 },
+    { "key": "r2:touch:4:5.92", "x": 0.531, "y": 0.810 },
+    { "key": "r2:touch:5:6.57", "x": 0.392, "y": 0.703 },
+    { "key": "r2:touch:6:7.15", "x": 0.487, "y": 0.606 },
+    { "key": "r2:touch:7:8.00", "x": 0.538, "y": 0.658 },
+    { "key": "r2:touch:8:8.57", "x": 0.567, "y": 0.612 },
+    { "key": "r2:drop_floor:0:9.51", "x": 0.903, "y": 0.714 },
+    { "key": "r3:touch:1:11.74", "x": 0.632, "y": 0.684 },
+    { "key": "r3:touch:2:12.47", "x": 0.567, "y": 0.732 },
+    { "key": "r3:stall:0:13.10", "x": 0.487, "y": 0.683 }
+  ]
+}

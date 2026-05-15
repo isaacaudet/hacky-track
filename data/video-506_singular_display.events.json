@@ -1,0 +1,144 @@
+{
+  "source_video": "video-506_singular_display.MOV",
+  "annotation_method": "user_corrected_hud_ground_truth",
+  "rallies": [
+    {
+      "id": 1,
+      "label": "Video 506 corrected rally",
+      "start_sec": 0.7,
+      "end_sec": 15.94,
+      "expected_touches": 19,
+      "expected_stalls": 1,
+      "events": [
+        {
+          "type": "touch",
+          "touch_number": 1,
+          "time_sec": 1.15,
+          "label": "corrected_touch"
+        },
+        {
+          "type": "touch",
+          "touch_number": 2,
+          "time_sec": 1.96,
+          "label": "corrected_touch"
+        },
+        {
+          "type": "stall",
+          "time_sec": 3.0,
+          "duration_sec": 0.78,
+          "label": "toe stall"
+        },
+        {
+          "type": "touch",
+          "touch_number": 3,
+          "time_sec": 4.36,
+          "label": "corrected_touch"
+        },
+        {
+          "type": "touch",
+          "touch_number": 4,
+          "time_sec": 4.98,
+          "label": "corrected_touch"
+        },
+        {
+          "type": "touch",
+          "touch_number": 5,
+          "time_sec": 5.3,
+          "label": "corrected_touch"
+        },
+        {
+          "type": "touch",
+          "touch_number": 6,
+          "time_sec": 5.62,
+          "label": "corrected_touch"
+        },
+        {
+          "type": "touch",
+          "touch_number": 7,
+          "time_sec": 6.33,
+          "label": "corrected_touch"
+        },
+        {
+          "type": "touch",
+          "touch_number": 8,
+          "time_sec": 7.18,
+          "label": "corrected_touch"
+        },
+        {
+          "type": "touch",
+          "touch_number": 9,
+          "time_sec": 8.07,
+          "label": "corrected_touch"
+        },
+        {
+          "type": "touch",
+          "touch_number": 10,
+          "time_sec": 8.81,
+          "label": "corrected_touch"
+        },
+        {
+          "type": "touch",
+          "touch_number": 11,
+          "time_sec": 9.46,
+          "label": "corrected_touch"
+        },
+        {
+          "type": "touch",
+          "touch_number": 12,
+          "time_sec": 10.07,
+          "label": "corrected_touch"
+        },
+        {
+          "type": "touch",
+          "touch_number": 13,
+          "time_sec": 10.97,
+          "label": "corrected_touch"
+        },
+        {
+          "type": "touch",
+          "touch_number": 14,
+          "time_sec": 11.74,
+          "label": "corrected_touch"
+        },
+        {
+          "type": "touch",
+          "touch_number": 15,
+          "time_sec": 12.63,
+          "label": "corrected_touch"
+        },
+        {
+          "type": "touch",
+          "touch_number": 16,
+          "time_sec": 13.32,
+          "label": "corrected_touch"
+        },
+        {
+          "type": "touch",
+          "touch_number": 17,
+          "time_sec": 14.01,
+          "label": "corrected_touch"
+        },
+        {
+          "type": "touch",
+          "touch_number": 18,
+          "time_sec": 14.69,
+          "label": "corrected_touch"
+        },
+        {
+          "type": "touch",
+          "touch_number": 19,
+          "time_sec": 15.19,
+          "label": "corrected_touch"
+        }
+      ]
+    }
+  ],
+  "special_events": [
+    {
+      "type": "around_the_world",
+      "start_sec": 3.55,
+      "end_sec": 4.28,
+      "label": "AROUND THE WORLD"
+    }
+  ]
+}
