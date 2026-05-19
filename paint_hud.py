@@ -629,9 +629,11 @@ def rally_state(t: float, rallies: list[Rally], events: list[Event]) -> dict[str
 def detect_bag_center(frame_bgr: np.ndarray) -> tuple[float, float] | None:
     h, w = frame_bgr.shape[:2]
     hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+    red_a = cv2.inRange(hsv, np.array([0, 55, 35]), np.array([18, 255, 255]))
+    red_b = cv2.inRange(hsv, np.array([165, 55, 35]), np.array([179, 255, 255]))
     green = cv2.inRange(hsv, np.array([28, 35, 35]), np.array([92, 255, 255]))
     yellow = cv2.inRange(hsv, np.array([12, 55, 45]), np.array([37, 255, 255]))
-    mask = green | yellow
+    mask = green | yellow | red_a | red_b
     gate = np.zeros_like(mask)
     gate[int(h * 0.38) :, :] = 255
     mask = cv2.bitwise_and(mask, gate)
