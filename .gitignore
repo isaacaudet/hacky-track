@@ -19,3 +19,7 @@ runs/
 models/
 tmp_samples/
 tmp_proto/
+
+# vendored third-party repos and downloaded model weights
+external/
+pretrained_weights/
