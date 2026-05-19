@@ -1,0 +1,462 @@
+{
+  "reviewed_at": "2026-05-15T22:20:00-07:00",
+  "reviewer": "codex_visual_review",
+  "notes": "Second-pass visual decisions from pending-only sequence sheets. These are traceable assisted visual labels, not user-provided ground truth.",
+  "decisions": [
+    {
+      "review_stem": "video-352_singular_display-2",
+      "item_id": "cand-r003-t002-0007670",
+      "kind": "touch",
+      "status": "approved",
+      "contact_side": "right",
+      "contact_type": "foot",
+      "evidence": "Pending touch strip shows the sack at the right shoe with immediate post-contact movement away from the foot."
+    },
+    {
+      "review_stem": "video-352_singular_display-2",
+      "item_id": "cand-r003-stall-0009100",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "The sack travels across the window and is not held on the foot or knee for a stall-duration interval."
+    },
+    {
+      "review_stem": "video-352_singular_display-2",
+      "item_id": "cand-r006-stall-0024590",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "The sequence shows hand/airborne motion, not a stable stall window on a contact surface."
+    },
+    {
+      "review_stem": "video-352_singular_display-2",
+      "item_id": "cand-r006-t009-0029920",
+      "kind": "touch",
+      "status": "approved",
+      "contact_side": "right",
+      "contact_type": "foot",
+      "evidence": "The sack approaches the right foot and exits with a direction change consistent with a kick."
+    },
+    {
+      "review_stem": "video-352_singular_display-2",
+      "item_id": "cand-r006-drop_-0032228",
+      "kind": "drop_floor",
+      "status": "rejected",
+      "evidence": "The full-frame and sequence sheets show the tracked reset marker away from a clear grounded sack; visible sack frames are airborne."
+    },
+    {
+      "review_stem": "video-352_singular_display-2",
+      "item_id": "cand-r011-stall-0054660",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "The sack is near a hand/ground transition and not held on a foot or knee across a duration window."
+    },
+    {
+      "review_stem": "video-352_singular_display-2",
+      "item_id": "cand-r011-t001-0054740",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "The strip shows hand interaction rather than a foot/knee touch."
+    },
+    {
+      "review_stem": "video-230_singular_display-2",
+      "item_id": "cand-r001-t005-0003910",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "The sack is low/on grass without a visible foot contact at the candidate instant."
+    },
+    {
+      "review_stem": "video-230_singular_display-2",
+      "item_id": "cand-r001-stall-0007510",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "The sack remains airborne/moving through the strip and is not held on the foot."
+    },
+    {
+      "review_stem": "video-230_singular_display-2",
+      "item_id": "cand-r001-stall-0008390",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "The sequence shows motion into and away from the shoe, not a stationary stall interval."
+    },
+    {
+      "review_stem": "video-230_singular_display-2",
+      "item_id": "cand-r001-t011-0008470",
+      "kind": "touch",
+      "status": "approved",
+      "contact_side": "right",
+      "contact_type": "foot",
+      "evidence": "The sack is at the shoe at the candidate time and then separates upward/right, consistent with a foot touch."
+    },
+    {
+      "review_stem": "video-230_singular_display-2",
+      "item_id": "cand-r001-drop_-0009320",
+      "kind": "drop_floor",
+      "status": "approved",
+      "contact_type": "ground",
+      "evidence": "The reset strip shows the sack down at grass/foot level after the contact sequence and before the next rally."
+    },
+    {
+      "review_stem": "video-230_singular_display-2",
+      "item_id": "cand-r002-stall-0016670",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "The ball path is moving through a touch/release sequence; no held stall is visible."
+    },
+    {
+      "review_stem": "video-230_singular_display-2",
+      "item_id": "cand-r003-t001-0020598",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Top-down strip does not show the sack in contact with either foot at the candidate frame."
+    },
+    {
+      "review_stem": "video-230_singular_display-2",
+      "item_id": "cand-r004-drop_-0023218",
+      "kind": "drop_floor",
+      "status": "rejected",
+      "evidence": "The visible sack/marker alignment is poor and the sequence does not clearly show a grounded reset."
+    },
+    {
+      "review_stem": "video-296_singular_display-2",
+      "item_id": "cand-r008-drop_-0027330",
+      "kind": "drop_floor",
+      "status": "rejected",
+      "evidence": "The sequence/full-frame sheets do not show a clear grounded sack at the tracked reset point."
+    },
+    {
+      "review_stem": "video-506_singular_display-2",
+      "item_id": "cand-r001-stall-0004360",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "The window is after the known stall/ATW action and shows the sack moving rather than being held."
+    },
+    {
+      "review_stem": "video-506_singular_display-2",
+      "item_id": "cand-r001-stall-0004900",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "The sack remains moving through the strip with no stable foot/knee hold."
+    },
+    {
+      "review_stem": "video-506_singular_display-2",
+      "item_id": "cand-r003-stall-0012590",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "The candidate is a moving low-ball/touch sequence, not a duration stall."
+    },
+    {
+      "review_stem": "video-506_singular_display-2",
+      "item_id": "cand-r003-t011-0015190",
+      "kind": "touch",
+      "status": "approved",
+      "contact_type": "foot",
+      "evidence": "The sack is near the shoe and changes path in the strip, consistent with a foot touch."
+    },
+    {
+      "review_stem": "video-506_singular_display-2",
+      "item_id": "cand-r003-t012-0016060",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "The candidate shows the sack traveling in open space with no visible body contact."
+    },
+    {
+      "review_stem": "video-498_singular_display",
+      "item_id": "cand-r002-t002-0003099",
+      "kind": "touch",
+      "status": "approved",
+      "contact_side": "right",
+      "contact_type": "foot",
+      "evidence": "The sack is at the right shoe around the candidate frame and then separates, consistent with a kick."
+    },
+    {
+      "review_stem": "video-498_singular_display",
+      "item_id": "cand-r002-drop_-0003379",
+      "kind": "drop_floor",
+      "status": "approved",
+      "contact_type": "ground",
+      "evidence": "The sack is visibly down at grass/foot level after the candidate touch, consistent with a reset/drop."
+    },
+    {
+      "review_stem": "video-498_singular_display",
+      "item_id": "cand-r003-stall-0012250",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "The strip shows a traveling sack and foot proximity, but no held stall interval."
+    },
+    {
+      "review_stem": "video-494_singular_display",
+      "item_id": "cand-r001-drop_-0001470",
+      "kind": "drop_floor",
+      "status": "rejected",
+      "evidence": "The frame is a hand-drop/setup moment, not a clear floor-reset event."
+    },
+    {
+      "review_stem": "video-494_singular_display",
+      "item_id": "cand-r002-t003-0007580",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "The sack is on/near grass and the strip does not show a decisive foot or knee contact."
+    },
+    {
+      "review_stem": "video-494_singular_display",
+      "item_id": "cand-r004-t001-0008950",
+      "kind": "touch",
+      "status": "approved",
+      "contact_side": "right",
+      "contact_type": "foot",
+      "evidence": "The setup strip shows the sack reaching the right shoe and changing path after contact."
+    },
+    {
+      "review_stem": "video-490_singular_display",
+      "item_id": "cand-r001-drop_-0002387",
+      "kind": "drop_floor",
+      "status": "approved",
+      "contact_type": "ground",
+      "evidence": "The sack is visible low/on grass through the reset sequence."
+    },
+    {
+      "review_stem": "video-490_singular_display",
+      "item_id": "cand-r003-drop_-0010010",
+      "kind": "drop_floor",
+      "status": "approved",
+      "contact_type": "ground",
+      "evidence": "The full-frame and sequence views show the sack settled near ground level after the rally."
+    },
+    {
+      "review_stem": "video-344_singular_display-2",
+      "item_id": "cand-r003-stall-0011125",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "The sack moves between foot/hand-adjacent frames without a stable held-contact duration."
+    },
+    {
+      "review_stem": "video-344_singular_display-2",
+      "item_id": "cand-r004-stall-0012550",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "The candidate looks like a moving low touch/recovery, not a stationary stall."
+    },
+    {
+      "review_stem": "video-344_singular_display-2",
+      "item_id": "cand-r008-stall-0022410",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "The ball travels through the frames and is not held on a body surface."
+    },
+    {
+      "review_stem": "video-344_singular_display-2",
+      "item_id": "cand-r008-t002-0022490",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "The sack is separated from the foot at the candidate instant; contact is not visible."
+    },
+    {
+      "review_stem": "video-308_singular_display-2",
+      "item_id": "cand-r004-stall-0013240",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "The strip shows a possible touch/recovery but not a held stall window."
+    },
+    {
+      "review_stem": "video-486_singular_display",
+      "item_id": "cand-r002-t006-0008260",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "The sack is near the ground and foot, but no decisive foot contact is visible at the candidate instant."
+    },
+    {
+      "review_stem": "video-332_singular_display-2",
+      "item_id": "cand-r002-stall-0006990",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "The ball is moving through a low contact window, not held as a stall."
+    },
+    {
+      "review_stem": "video-332_singular_display-2",
+      "item_id": "cand-r003-stall-0009670",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "Foot proximity is present, but the sack is not visibly held across the stall-duration window."
+    },
+    {
+      "review_stem": "video-332_singular_display-2",
+      "item_id": "cand-r003-t009-0015320",
+      "kind": "touch",
+      "status": "approved",
+      "contact_type": "foot",
+      "evidence": "Despite partial finger occlusion, the strip shows the sack at the shoe with a post-contact path change."
+    },
+    {
+      "review_stem": "video-482_singular_display",
+      "item_id": "cand-r001-t004-0008420",
+      "kind": "touch",
+      "status": "approved",
+      "contact_side": "right",
+      "contact_type": "foot",
+      "evidence": "The sack reaches the shoe and rebounds away in the sequence."
+    },
+    {
+      "review_stem": "video-336_singular_display-2",
+      "item_id": "cand-r001-t001-0002060",
+      "kind": "touch",
+      "status": "approved",
+      "contact_type": "foot",
+      "evidence": "The sack arrives at foot level and separates immediately after the candidate frame."
+    },
+    {
+      "review_stem": "video-336_singular_display-2",
+      "item_id": "cand-r001-t003-0005100",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "The sack is traveling in open space away from the foot; no touch is visible."
+    },
+    {
+      "review_stem": "video-336_singular_display-2",
+      "item_id": "cand-r002-stall-0010250",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "The candidate is a moving near-foot ball, not a stable held stall."
+    },
+    {
+      "review_stem": "video-336_singular_display-2",
+      "item_id": "cand-r002-t014-0015510",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "The sack is in the yard/air path with no visible knee or foot contact at the candidate frame."
+    },
+    {
+      "review_stem": "video-478_singular_display",
+      "item_id": "cand-r001-t003-0007190",
+      "kind": "touch",
+      "status": "approved",
+      "contact_type": "foot",
+      "evidence": "The sack passes the shoe at contact height and changes path after the candidate frame."
+    },
+    {
+      "review_stem": "video-474_singular_display",
+      "item_id": "cand-r001-stall-0001460",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "The strip shows a hand/setup phase and moving sack, not a held stall."
+    },
+    {
+      "review_stem": "video-474_singular_display",
+      "item_id": "cand-r001-stall-0002690",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "The sack is near the foot but continues moving; no duration hold is visible."
+    },
+    {
+      "review_stem": "video-474_singular_display",
+      "item_id": "cand-r001-t004-0003620",
+      "kind": "touch",
+      "status": "approved",
+      "contact_side": "left",
+      "contact_type": "foot",
+      "evidence": "The sack is at the left foot and separates after contact."
+    },
+    {
+      "review_stem": "video-474_singular_display",
+      "item_id": "cand-r001-t005-0004410",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "This appears to be the same near-foot action as the previous accepted touch and is too close in time to count separately."
+    },
+    {
+      "review_stem": "video-474_singular_display",
+      "item_id": "cand-r003-drop_-0006320",
+      "kind": "drop_floor",
+      "status": "approved",
+      "contact_type": "ground",
+      "evidence": "The sack is visible low/on grass near the foot after the rally action, consistent with a reset."
+    },
+    {
+      "review_stem": "video-469_singular_display",
+      "item_id": "cand-r001-t004-0005150",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "The sack is separated from the shoe and no contact is visible."
+    },
+    {
+      "review_stem": "video-463_singular_display",
+      "item_id": "cand-r001-t006-0005030",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "The strip looks like a ground/near-ground candidate rather than a clean kick or knee touch."
+    },
+    {
+      "review_stem": "video-234_singular_display-2",
+      "item_id": "cand-r002-stall-0005530",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "The sack remains in motion around the shoe; it is not held."
+    },
+    {
+      "review_stem": "video-234_singular_display-2",
+      "item_id": "cand-r002-stall-0006340",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "The sequence shows continued ball motion and no stable stall interval."
+    },
+    {
+      "review_stem": "video-439_singular_display",
+      "item_id": "cand-r003-t001-0004750",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "The sack is low and separated from the foot; the strip does not show a decisive touch."
+    },
+    {
+      "review_stem": "video-340_singular_display-2",
+      "item_id": "cand-r003-stall-0003080",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "The candidate shows the sack moving through the rally rather than sitting on a contact surface."
+    },
+    {
+      "review_stem": "video-340_singular_display-2",
+      "item_id": "cand-r003-t006-0006470",
+      "kind": "touch",
+      "status": "approved",
+      "contact_type": "foot",
+      "evidence": "The sack reaches the foot and then rebounds, matching a rally touch in the selected best-rally window."
+    },
+    {
+      "review_stem": "video-245_singular_display-2",
+      "item_id": "cand-r001-t001-0002670",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "The candidate is a hand/drop setup and does not show a counted foot or knee touch."
+    },
+    {
+      "review_stem": "video-245_singular_display-2",
+      "item_id": "cand-r002-t001-0005590",
+      "kind": "touch",
+      "status": "approved",
+      "contact_side": "right",
+      "contact_type": "foot",
+      "evidence": "The sack is at the right foot at the candidate frame and moves away afterward."
+    },
+    {
+      "review_stem": "video-431_singular_display",
+      "item_id": "cand-r001-t001-0001370",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "The sack is on/near grass and the foot is not in visible contact at the candidate time."
+    },
+    {
+      "review_stem": "video-431_singular_display",
+      "item_id": "cand-r001-t002-0002100",
+      "kind": "touch",
+      "status": "approved",
+      "contact_type": "foot",
+      "evidence": "The sack is at foot level and rebounds in the immediate post-contact frames."
+    },
+    {
+      "review_stem": "video-431_singular_display",
+      "item_id": "cand-r001-drop_-0003432",
+      "kind": "drop_floor",
+      "status": "approved",
+      "contact_type": "ground",
+      "evidence": "The reset sheet shows the sack down on the grass after the short rally."
+    }
+  ]
+}

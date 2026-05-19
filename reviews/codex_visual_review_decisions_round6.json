@@ -1,0 +1,23 @@
+{
+  "reviewed_at": "2026-05-15T22:39:00-07:00",
+  "reviewer": "codex_visual_review",
+  "notes": "Sixth-pass decisions for the final two pending items after global duplicate-reset suppression.",
+  "decisions": [
+    {
+      "review_stem": "video-352_singular_display-2",
+      "item_id": "cand-r003-drop_-0013798",
+      "kind": "drop_floor",
+      "status": "approved",
+      "contact_type": "ground",
+      "evidence": "The sack is visibly down on the grass with no active foot contact, so it is a valid rally reset."
+    },
+    {
+      "review_stem": "video-474_singular_display",
+      "item_id": "cand-r001-t001-0002810",
+      "kind": "touch",
+      "status": "approved",
+      "contact_type": "foot",
+      "evidence": "The shoe meets the sack at the event frame and the sack separates afterward, consistent with a physical foot contact."
+    }
+  ]
+}

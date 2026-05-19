@@ -1,0 +1,30 @@
+{
+  "reviewed_at": "2026-05-15T22:31:00-07:00",
+  "reviewer": "codex_visual_review",
+  "notes": "Fifth-pass decisions for the three regenerated pending review-batch items after reset filtering changes.",
+  "decisions": [
+    {
+      "review_stem": "video-332_singular_display-2",
+      "item_id": "cand-r003-drop_-0015764",
+      "kind": "drop_floor",
+      "status": "approved",
+      "contact_type": "ground",
+      "evidence": "The sack is low/on grass after the last contact with no controlled follow-up touch, so it is a reset."
+    },
+    {
+      "review_stem": "video-474_singular_display",
+      "item_id": "cand-r002-drop_-0006320",
+      "kind": "drop_floor",
+      "status": "rejected",
+      "evidence": "This is still the same dead-ball sequence after the previous floor reset; no touch intervenes, so it should not create a second reset."
+    },
+    {
+      "review_stem": "video-457_singular_display",
+      "item_id": "cand-r002-t001-0007280",
+      "kind": "touch",
+      "status": "approved",
+      "contact_type": "foot",
+      "evidence": "The shoe reaches the sack at the event frame and the sack separates afterward, consistent with a physical foot contact."
+    }
+  ]
+}

@@ -1,0 +1,449 @@
+{
+  "reviewed_at": "2026-05-15T21:38:00-07:00",
+  "reviewer": "codex_visual_review",
+  "notes": "Third-pass decisions for the regenerated stricter QA review batch.",
+  "decisions": [
+    {
+      "review_stem": "video-230_singular_display-2",
+      "item_id": "cand-r002-t002-0008470",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-234_singular_display-2",
+      "item_id": "cand-r002-t003-0005610",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-296_singular_display-2",
+      "item_id": "cand-r003-t002-0018800",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-296_singular_display-2",
+      "item_id": "cand-r005-t001-0024730",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-332_singular_display-2",
+      "item_id": "cand-r003-t008-0015320",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-336_singular_display-2",
+      "item_id": "cand-r002-t002-0007290",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-340_singular_display-2",
+      "item_id": "cand-r003-t009-0008220",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-445_singular_display",
+      "item_id": "cand-r001-t001-0001260",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-457_singular_display",
+      "item_id": "cand-r002-t003-0002990",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-463_singular_display",
+      "item_id": "cand-r001-t003-0003020",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-463_singular_display",
+      "item_id": "cand-r001-t005-0004460",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-463_singular_display",
+      "item_id": "cand-r001-t006-0005580",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-469_singular_display",
+      "item_id": "cand-r001-t001-0002870",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-469_singular_display",
+      "item_id": "cand-r001-t002-0003820",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-469_singular_display",
+      "item_id": "cand-r001-t005-0006020",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-469_singular_display",
+      "item_id": "cand-r001-t006-0006670",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-474_singular_display",
+      "item_id": "cand-r001-t003-0003620",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-478_singular_display",
+      "item_id": "cand-r001-t002-0006340",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-482_singular_display",
+      "item_id": "cand-r001-t001-0006240",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-486_singular_display",
+      "item_id": "cand-r001-t001-0001030",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-490_singular_display",
+      "item_id": "cand-r002-t002-0008750",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-498_singular_display",
+      "item_id": "cand-r001-t001-0001410",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-498_singular_display",
+      "item_id": "cand-r003-t007-0010890",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-506_singular_display-2",
+      "item_id": "cand-r003-t001-0008810",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-506_singular_display-2",
+      "item_id": "cand-r003-t002-0010070",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-506_singular_display-2",
+      "item_id": "cand-r003-t003-0011740",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-506_singular_display-2",
+      "item_id": "cand-r003-t004-0012630",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-506_singular_display-2",
+      "item_id": "cand-r003-t008-0015190",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Current pending strip shows the sack reaching the foot and separating afterward, consistent with a counted touch.",
+      "contact_type": "foot"
+    },
+    {
+      "review_stem": "video-308_singular_display-2",
+      "item_id": "cand-r005-t003-0016920",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Current pending strip does not show a decisive foot/knee contact; the sack is airborne, hand/setup, ground-adjacent, or separated from the foot."
+    },
+    {
+      "review_stem": "video-308_singular_display-2",
+      "item_id": "cand-r006-t001-0023550",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Current pending strip does not show a decisive foot/knee contact; the sack is airborne, hand/setup, ground-adjacent, or separated from the foot."
+    },
+    {
+      "review_stem": "video-344_singular_display-2",
+      "item_id": "cand-r006-t002-0022490",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Current pending strip does not show a decisive foot/knee contact; the sack is airborne, hand/setup, ground-adjacent, or separated from the foot."
+    },
+    {
+      "review_stem": "video-352_singular_display-2",
+      "item_id": "cand-r003-t005-0009770",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Current pending strip does not show a decisive foot/knee contact; the sack is airborne, hand/setup, ground-adjacent, or separated from the foot."
+    },
+    {
+      "review_stem": "video-352_singular_display-2",
+      "item_id": "cand-r003-t006-0011440",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Current pending strip does not show a decisive foot/knee contact; the sack is airborne, hand/setup, ground-adjacent, or separated from the foot."
+    },
+    {
+      "review_stem": "video-352_singular_display-2",
+      "item_id": "cand-r006-t003-0024910",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Current pending strip does not show a decisive foot/knee contact; the sack is airborne, hand/setup, ground-adjacent, or separated from the foot."
+    },
+    {
+      "review_stem": "video-352_singular_display-2",
+      "item_id": "cand-r009-t001-0043510",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Current pending strip does not show a decisive foot/knee contact; the sack is airborne, hand/setup, ground-adjacent, or separated from the foot."
+    },
+    {
+      "review_stem": "video-445_singular_display",
+      "item_id": "cand-r001-t002-0002380",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Current pending strip does not show a decisive foot/knee contact; the sack is airborne, hand/setup, ground-adjacent, or separated from the foot."
+    },
+    {
+      "review_stem": "video-457_singular_display",
+      "item_id": "cand-r004-t001-0006660",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Current pending strip does not show a decisive foot/knee contact; the sack is airborne, hand/setup, ground-adjacent, or separated from the foot."
+    },
+    {
+      "review_stem": "video-457_singular_display",
+      "item_id": "cand-r004-t003-0008120",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Current pending strip does not show a decisive foot/knee contact; the sack is airborne, hand/setup, ground-adjacent, or separated from the foot."
+    },
+    {
+      "review_stem": "video-474_singular_display",
+      "item_id": "cand-r001-t001-0001540",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Current pending strip does not show a decisive foot/knee contact; the sack is airborne, hand/setup, ground-adjacent, or separated from the foot."
+    },
+    {
+      "review_stem": "video-474_singular_display",
+      "item_id": "cand-r002-t001-0005430",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Current pending strip does not show a decisive foot/knee contact; the sack is airborne, hand/setup, ground-adjacent, or separated from the foot."
+    },
+    {
+      "review_stem": "video-494_singular_display",
+      "item_id": "cand-r002-t001-0006130",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Current pending strip does not show a decisive foot/knee contact; the sack is airborne, hand/setup, ground-adjacent, or separated from the foot."
+    },
+    {
+      "review_stem": "video-506_singular_display-2",
+      "item_id": "cand-r001-t005-0005300",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Current pending strip does not show a decisive foot/knee contact; the sack is airborne, hand/setup, ground-adjacent, or separated from the foot."
+    },
+    {
+      "review_stem": "video-230_singular_display-2",
+      "item_id": "cand-r002-drop_-0009320",
+      "kind": "drop_floor",
+      "status": "approved",
+      "evidence": "Current reset strip shows the sack down at grass level after/inside a rally gap, consistent with a floor reset.",
+      "contact_type": "ground"
+    },
+    {
+      "review_stem": "video-344_singular_display-2",
+      "item_id": "cand-r003-drop_-0011498",
+      "kind": "drop_floor",
+      "status": "approved",
+      "evidence": "Current reset strip shows the sack down at grass level after/inside a rally gap, consistent with a floor reset.",
+      "contact_type": "ground"
+    },
+    {
+      "review_stem": "video-486_singular_display",
+      "item_id": "cand-r002-drop_-0007760",
+      "kind": "drop_floor",
+      "status": "approved",
+      "evidence": "Current reset strip shows the sack down at grass level after/inside a rally gap, consistent with a floor reset.",
+      "contact_type": "ground"
+    },
+    {
+      "review_stem": "video-490_singular_display",
+      "item_id": "cand-r002-drop_-0010010",
+      "kind": "drop_floor",
+      "status": "approved",
+      "evidence": "Current reset strip shows the sack down at grass level after/inside a rally gap, consistent with a floor reset.",
+      "contact_type": "ground"
+    },
+    {
+      "review_stem": "video-498_singular_display",
+      "item_id": "cand-r002-drop_-0003032",
+      "kind": "drop_floor",
+      "status": "approved",
+      "evidence": "Current reset strip shows the sack down at grass level after/inside a rally gap, consistent with a floor reset.",
+      "contact_type": "ground"
+    },
+    {
+      "review_stem": "video-230_singular_display-2",
+      "item_id": "cand-r001-drop_-0006780",
+      "kind": "drop_floor",
+      "status": "rejected",
+      "evidence": "Current reset strip does not show a clear grounded sack at the candidate time; visible sack frames are airborne, hand/setup, or tracker-misaligned."
+    },
+    {
+      "review_stem": "video-230_singular_display-2",
+      "item_id": "cand-r006-drop_-0023218",
+      "kind": "drop_floor",
+      "status": "rejected",
+      "evidence": "Current reset strip does not show a clear grounded sack at the candidate time; visible sack frames are airborne, hand/setup, or tracker-misaligned."
+    },
+    {
+      "review_stem": "video-296_singular_display-2",
+      "item_id": "cand-r006-drop_-0027330",
+      "kind": "drop_floor",
+      "status": "rejected",
+      "evidence": "Current reset strip does not show a clear grounded sack at the candidate time; visible sack frames are airborne, hand/setup, or tracker-misaligned."
+    },
+    {
+      "review_stem": "video-308_singular_display-2",
+      "item_id": "cand-r004-drop_-0013832",
+      "kind": "drop_floor",
+      "status": "rejected",
+      "evidence": "Current reset strip does not show a clear grounded sack at the candidate time; visible sack frames are airborne, hand/setup, or tracker-misaligned."
+    },
+    {
+      "review_stem": "video-486_singular_display",
+      "item_id": "cand-r001-drop_-0001430",
+      "kind": "drop_floor",
+      "status": "rejected",
+      "evidence": "Current reset strip does not show a clear grounded sack at the candidate time; visible sack frames are airborne, hand/setup, or tracker-misaligned."
+    },
+    {
+      "review_stem": "video-482_singular_display",
+      "item_id": "cand-r001-stall-0007640",
+      "kind": "stall",
+      "status": "approved",
+      "evidence": "Current stall strip shows the sack staying close to the foot across the duration window rather than an instant moving touch.",
+      "contact_type": "stall"
+    },
+    {
+      "review_stem": "video-490_singular_display",
+      "item_id": "cand-r001-stall-0001867",
+      "kind": "stall",
+      "status": "approved",
+      "evidence": "Current stall strip shows the sack staying close to the foot across the duration window rather than an instant moving touch.",
+      "contact_type": "stall"
+    },
+    {
+      "review_stem": "video-506_singular_display-2",
+      "item_id": "cand-r001-stall-0003000",
+      "kind": "stall",
+      "status": "approved",
+      "evidence": "Current stall strip shows the sack staying close to the foot across the duration window rather than an instant moving touch.",
+      "contact_type": "stall"
+    },
+    {
+      "review_stem": "video-234_singular_display-2",
+      "item_id": "cand-r001-stall-0001190",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "Current stall strip shows hand/setup or continued ball travel, not a held foot/knee stall window."
+    },
+    {
+      "review_stem": "video-332_singular_display-2",
+      "item_id": "cand-r001-stall-0000900",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "Current stall strip shows hand/setup or continued ball travel, not a held foot/knee stall window."
+    },
+    {
+      "review_stem": "video-344_singular_display-2",
+      "item_id": "cand-r006-stall-0022930",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "Current stall strip shows hand/setup or continued ball travel, not a held foot/knee stall window."
+    }
+  ]
+}
