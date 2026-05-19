@@ -1,0 +1,49 @@
+# Changelog
+
+## Unreleased
+
+- Added `hackytrack.py` public CLI with `process`, `review`, `review-evidence`, `seed-reviews`, `apply-decisions`, `verify`, and `evaluate` commands.
+- Added versioned release run directories under `runs/`.
+- Added top-level `events.json`, `events.csv`, and `rallies.json` exports.
+- Added `portable_paths_audit.json` and text-artifact path sanitization for release runs.
+- Added run-specific review app configuration.
+- Added grouped review evidence packs for gap floor resets, ball-center risk, drop review, side/contact uncertainty, stalls/tricks, and likely missed touches.
+- Added run-scoped review batch seeding and traceable decision application so clean labels can be collected under a run directory instead of the repo-global `reviews/` folder.
+- Added active-learning review proposals for likely missed touches, drops, stalls, and tricks.
+- Added active-learning missing floor reset proposals for rallies ending by a long gap without a detected drop.
+- Added review-app support for approving active-learning proposals as missing events.
+- Added `apply_reviews_to_qa.py` and `hackytrack.py apply-reviews` so reviewed missing drops/touches/stalls can be materialized back into QA analytics and rally segmentation.
+- Added `export_detector_dataset.py` and `hackytrack.py export-detector-dataset` to export reviewed `footbag` labels in a YOLO-compatible layout with separate hard-negative center crops.
+- Added `build_detector_label_review_batch.py` and `hackytrack.py detector-label-review` to mine QA ball centers into detector-specific object-label review sheets and decision templates, plus dataset-export ingestion for completed detector-label decisions.
+- Added `assist_detector_label_decisions.py` and `hackytrack.py assist-detector-labels` for conservative CV-assisted detector-label suggestions that leave ambiguous rows pending.
+- Added `build_detector_false_positive_review_batch.py` and `hackytrack.py detector-false-positive-review` to mine trained-detector false positives into reviewable hard-negative/correction sheets.
+- Added `build_detector_error_review_batch.py` and `hackytrack.py detector-error-review` to mine model/track evaluation failures into reviewed-label recovery sheets while preserving held-out test rows as audit-only evidence.
+- Added `build_dense_trajectory_review_batch.py`, `evaluate_dense_trajectory.py`, and public `dense-trajectory-review` / `evaluate-dense-trajectory` commands for the dense temporal-tracking path that should replace sparse YOLO retraining.
+- Added multi-source detector review ingestion to `export-detector-dataset` via repeatable `--detector-label-review-pair`.
+- Added hard-negative empty-label YOLO image export and `train_footbag_detector.py` / `hackytrack.py train-detector` as the first custom detector training wrapper, including saved final Ultralytics precision/recall/mAP metrics in the training manifest.
+- Added best-epoch metrics to detector training manifests so `footbag_detector_best.pt` can be compared against the epoch that produced it, not only the final epoch.
+- Added `footbag_detector_inference.py` and `hackytrack.py detect-footbag` for trained-detector inference, JSONL fixture replay, tracker smoothing, and auditable track exports.
+- Added footbag-size bbox filtering to detector inference before tracker smoothing, so huge low-confidence model boxes are rejected with manifest counts.
+- Added `hackytrack.py detect-footbag-batch` to run detector inference across all videos in a run or QA manifest and write a batch manifest.
+- Added `apply_detector_track_to_qa.py` and `hackytrack.py apply-detector-track` so trained-detector ball evidence can be attached to QA events before replacing heuristic centers.
+- Added `evaluate_detector_tracks.py` and `hackytrack.py evaluate-detector` for reviewed-label detector center metrics and hard-negative false-positive checks.
+- Added `evaluate_detector_model.py` and `hackytrack.py evaluate-detector-model` as a pre-inference sanity gate for trained detector checkpoints, plus `train-detector --recover-existing` for interrupted Ultralytics runs.
+- Added validation-split detector threshold calibration to `evaluate-detector-model` and `--calibration-metrics` support to `detect-footbag` / `detect-footbag-batch`.
+- Added `summarize_detector_batch.py` and `hackytrack.py summarize-detector-batch` for detector batch coverage, interpolation, and per-video failure flag reports.
+- Added v10 detector recall-recovery artifacts from reviewed calibrated false-positive candidates, including a larger YOLO dataset, retrained checkpoint, model sanity metrics, processed-coordinate batch summary, and detector-track evaluation evidence.
+- Added v11 detector error-recovery artifacts from v10 model/track failures; v11 is recorded as evidence-only because processed-coordinate track evaluation regressed from v10 and still fails release-promotion gates.
+- Added a v10 temporal-tracker baseline and first dense trajectory review batch focused on `video-352`, `video-230`, and `video-234`; human dense labeling is now the blocker before temporal heatmap training.
+- Added `patch_footbag_detector.py` plus `hackytrack.py train-patch-detector` / `evaluate-patch-detector` as a trained second-stage objectness model for reviewed footbag crops and auditable CV proposals.
+- Added centered hard-negative point ingestion to the patch detector trainer, so reviewed false-positive crops from `hard_negatives/points.jsonl` become direct negative samples instead of only empty-label YOLO images.
+- Added `train-patch-detector --model-kind extra-trees` for a non-linear patch/objectness baseline.
+- Added processed-frame coordinate support and `--patch-model` inference to `footbag_detector_inference.py` / `hackytrack.py detect-footbag`, so detector tracks can be emitted in the same `688x912` QA coordinate system as reviewed labels.
+- Added configurable confidence windows to detector false-positive review mining and changed far-from-QA detections to default to `verify_or_correct` review instead of biased automatic hard-negative suggestions.
+- Added release evaluation with deterministic split metrics and target gates.
+- Added strict rally audit reports showing why best-rally HUD candidates are accepted or rejected.
+- Added release-candidate gate report generation through `release_candidate_report.py` and `hackytrack.py report`.
+- Added HUD skip/error behavior for clips with no strict-complete rally.
+- Added `--allow-incomplete-hud` and `--require-hud` CLI flags.
+- Added release CLI unit tests.
+- Tightened left/right side evidence so clear off-center or ball-disambiguated foot contacts are not left as unknown, while centerline contacts remain review-needed.
+- Added lower-limb side anchoring and touch suppression gates for large skin-like ball snaps and weak foot-candidate visual mismatches.
+- Updated README quickstart for release-style usage.
