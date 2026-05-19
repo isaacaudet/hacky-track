@@ -6,9 +6,16 @@ __pycache__/
 venv/
 
 outputs/
+runs/
 *.MOV
 *.mov
 *.MP4
 *.mp4
 *.avi
 *.mkv
+
+# large model weights and throwaway artifacts
+*.pt
+models/
+tmp_samples/
+tmp_proto/
