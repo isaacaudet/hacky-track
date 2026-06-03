@@ -27,19 +27,31 @@ produce the sustained lock-on that killed L2 in Round 0.
 
 ## Results — zero-shot WASB on footbag
 
-Two preprocessing variants, both with no fine-tuning:
+Preprocessing variants, all with no fine-tuning:
 
 | Preprocessing | peak confidence (mean / max) | peak near ball |
 |---|---|---|
 | Full-frame letterbox (portrait → 512×288) | 0.085 / 0.49 | 0 % within 5 % image diag |
-| **Fair 16:9 ROI crop** (1024×576 around the ball → 512×288) | **0.044 / 0.15** | **0 % @40px · 1 % @80px · 3 % @150px** |
+| Fair 16:9 ROI crop, raw /255 | 0.044 / 0.15 | 0 % @40px · 1 % @80px · 3 % @150px |
+| **ROI crop + ImageNet norm** (corrected — WASB's actual test transform) | **0.028 / 0.06** | **4 % @40px · 11 % @80px · 18 % @150px** |
 
 The ROI crop was tested specifically to rule out the obvious confound — that
 letterboxing a 2192×2928 portrait into 512×288 shrinks the footbag to ~6 px.
 With a fair 16:9 crop (footbag ~30 px, no aspect distortion) WASB did **not**
-improve — confidence was actually *lower*, at the noise floor. The visual
-montage (`tmp_proto/wasb_feasibility.png`) confirms it: the WASB peak lands on
-random grass/wall in every frame; the footbag is never detected.
+improve — confidence was actually *lower*, at the noise floor.
+
+**Preprocessing correction (post-R1 harness audit).** The first two rows used
+`/255`-only input. An audit of WASB's own `dataloaders/build_img_transforms`
+showed its test transform is `ToTensor + Normalize(ImageNet mean/std)` — applied
+for train *and* test. The R1 harness omitted the `Normalize`, feeding the net
+un-normalized input it was never trained on. The third row re-runs with the
+correct normalization. Result: confidence stays pinned to the noise floor
+(0.06 max vs the ~0.5 a real detection needs); localization is marginally less
+random (3 %→18 % within 150 px, still chance-level for a 1024-px-wide crop).
+**The bug was real but the conclusion is unchanged** — fixing it confirms the
+domain gap rather than closing it. The montage
+(`tmp_proto/wasb_feasibility.png`, normalized run) shows the peak still landing
+on random grass/wall; the footbag is never detected.
 
 ## The finding
 
@@ -81,20 +93,28 @@ and no systematic lock-on.*
 - **One clip only.** video-506 is a clean outdoor clip. The result is so
   unambiguous (confidence at noise floor) that one clip strongly indicates the
   conclusion, but T1.5's 5-clip set should still confirm it before R3.
-- **Harness not yet validated on WASB's home turf.** The most important missing
-  check: run `wasb_feasibility.py` on a *tennis* clip and confirm it detects the
-  tennis ball with high confidence. If it does, the harness is proven correct
-  and footbag transfer genuinely fails; if it doesn't, the harness has a
-  preprocessing bug. **Do this first in Round 2.**
-- Preprocessing assumed `/255` + RGB + 3-frame concat, no mean/std (matches
-  WASB's `ToTensor`-only transform) — consistent with the loaded checkpoint, but
-  the tennis-clip check above is what definitively validates it.
+- **Harness preprocessing — audited and corrected.** The harness was validated
+  line-by-line against WASB's own inference path (`detectors/detector.py`,
+  `dataloaders/dataset_loader.py`, `build_img_transforms`): RGB channel order,
+  `/255`, 3-frame channel concat (oldest→newest), output channel ↔ input frame
+  mapping (last = current), and `sigmoid` on logits all match. **One mismatch
+  was found and fixed:** WASB's test transform applies ImageNet `Normalize`; the
+  original harness omitted it. Re-running with the fix (results table above)
+  leaves the conclusion unchanged. The one remaining empirical check — running
+  the corrected harness on an in-domain tennis clip — is now a low-priority
+  confirmation rather than a blocker, since the preprocessing match is verified
+  against WASB's source.
+- Geometric front-end differs from WASB by design: WASB anamorphically warps a
+  centered `max(h,w)` square via `get_affine_transform`; the harness uses a 16:9
+  ROI crop so the tiny footbag is ~30 px not ~6 px. This is a deliberate
+  adaptation, not a bug, and a fine-tuned detector will keep the ROI crop.
 
 ## Hand-off to Round 2
 
 - Treat the detector as untrained: the R2 labeling loop is the prerequisite for
   any working detector, with no zero-shot crutch.
-- First R2 action: validate the harness on a tennis clip (above).
+- The harness preprocessing is now audited against WASB source and corrected
+  (ImageNet `Normalize` added) — no tennis-clip validation needed before R2.
 - The ROI-crop front-end (`wasb_feasibility.py:letterbox`/crop logic) is
   reusable — a fine-tuned WASB will still want a region crop, since the footbag
   is tiny in a full portrait frame.

@@ -700,8 +700,8 @@ APP_HTML = r"""<!doctype html>
           <button data-vis="uncertain">5 Uncertain</button>
         </div>
         <div class="row wrap">
-          <button id="acceptBtn" class="good">Accept reviewed</button>
-          <button id="acceptNextBtn" class="primary">Accept + next</button>
+          <button id="acceptBtn" class="good">Approve point</button>
+          <button id="acceptNextBtn" class="primary">Approve + next</button>
           <button id="pendingBtn">Mark pending</button>
           <button id="clearBtn" class="warn">Clear point</button>
         </div>
@@ -727,7 +727,7 @@ APP_HTML = r"""<!doctype html>
         <p class="section-title">Controls</p>
         <div class="footer-help">
           Click image to place the ball. Keys: j/k next/prev, arrows step frames,
-          1-5 visibility, a accept, enter uses CoTracker+next when available, p pending, n next pending.
+          1-5 visibility, a approve current point, enter approve+next, p pending, n next pending.
           Test/audit rows can be reviewed for evaluation but remain audit_only and are excluded from training.
         </div>
       </section>
@@ -749,6 +749,7 @@ APP_HTML = r"""<!doctype html>
       label: "#37d67a",
       cotracker: "#e06cff",
     };
+    const COTRACKER_AUTO_VISIBILITY = 0.25;
     const frame = document.getElementById("frame");
     const canvas = document.getElementById("overlay");
     const ctx = canvas.getContext("2d");
@@ -765,6 +766,10 @@ APP_HTML = r"""<!doctype html>
 
     function currentSuggestion(row = current()) {
       return (app.suggestions[row.clip_id] || {})[row.frame_index] || null;
+    }
+
+    function suggestionIsAutoSafe(suggestion) {
+      return suggestion && Number(suggestion.visibility_score || 0) >= COTRACKER_AUTO_VISIBILITY;
     }
 
     function clipRows(clipId) {
@@ -983,11 +988,22 @@ APP_HTML = r"""<!doctype html>
         return;
       }
       if (suggestion) {
-        button.textContent = "Use suggestion + next";
-        button.className = "good active";
+        const score = Number(suggestion.visibility_score || 0);
+        const safe = suggestionIsAutoSafe(suggestion);
+        const hasPoint = Number.isFinite(row.x) && Number.isFinite(row.y);
+        button.textContent = safe ? "Use suggestion + next" : "Use low-vis suggestion";
+        button.className = safe ? "good active" : "warn";
         button.disabled = false;
-        document.getElementById("cotrackerMeta").textContent =
-          `Default: Enter uses CoTracker, marks reviewed, and advances. x=${Number(suggestion.x).toFixed(1)}, y=${Number(suggestion.y).toFixed(1)}, visibility=${Number(suggestion.visibility_score || 0).toFixed(2)}`;
+        if (safe && hasPoint) {
+          document.getElementById("cotrackerMeta").textContent =
+            `CoTracker is available, but Enter approves the current green point. Click Use suggestion + next only if the purple point is better. visibility=${score.toFixed(2)}`;
+        } else if (safe) {
+          document.getElementById("cotrackerMeta").textContent =
+            `Default: Enter uses CoTracker, marks reviewed, and advances. x=${Number(suggestion.x).toFixed(1)}, y=${Number(suggestion.y).toFixed(1)}, visibility=${score.toFixed(2)}`;
+        } else {
+          document.getElementById("cotrackerMeta").textContent =
+            `Low CoTracker visibility (${score.toFixed(2)}). Enter approves your current point if one exists; click the yellow button only if the purple point is actually right.`;
+        }
       } else {
         button.textContent = "Use suggestion";
         button.className = "";
@@ -1027,11 +1043,13 @@ APP_HTML = r"""<!doctype html>
     }
 
     async function acceptAndNext() {
-      if (currentSuggestion()) {
+      const row = current();
+      const hasPoint = Number.isFinite(row.x) && Number.isFinite(row.y);
+      const suggestion = currentSuggestion();
+      if (!hasPoint && suggestionIsAutoSafe(suggestion)) {
         return useSuggestion({ review: true, advance: true });
       }
-      const ok = await acceptReviewed();
-      if (ok) step(1);
+      return approveExistingPoint({ advance: true });
     }
 
     function nextPending() {
@@ -1058,18 +1076,39 @@ APP_HTML = r"""<!doctype html>
       savePatch(patch);
     }
 
-    function acceptReviewed() {
+    async function approveExistingPoint(options = {}) {
       const row = current();
-      if ((row.visibility === "visible" || row.visibility === "partially_occluded") &&
-          (!Number.isFinite(row.x) || !Number.isFinite(row.y))) {
-        showError("Visible reviewed rows need an x/y point.");
+      const hasPoint = Number.isFinite(row.x) && Number.isFinite(row.y);
+      if (hasPoint) {
+        const visibility = row.visibility === "partially_occluded" ? "partially_occluded" : "visible";
+        const ok = await savePatch({
+          visibility,
+          occlusion: visibility === "partially_occluded" ? "partial" : "none",
+          quality: "reviewed",
+          label_source: row.label_source || "human_dense_review",
+        });
+        if (ok && options.advance) step(1);
+        return ok;
+      }
+      if (row.visibility === "fully_occluded" || row.visibility === "out_of_frame") {
+        const ok = await savePatch({ quality: "reviewed", label_source: "human_dense_review" });
+        if (ok && options.advance) step(1);
+        return ok;
+      }
+      const suggestion = currentSuggestion();
+      if (suggestionIsAutoSafe(suggestion)) {
+        return useSuggestion({ review: true, advance: Boolean(options.advance) });
+      }
+      if (suggestion) {
+        showError("The visible CoTracker point is low-confidence. Click it only if it is right, or place your own point, then approve.");
         return false;
       }
-      if (row.visibility === "uncertain" || row.visibility === "unlabeled") {
-        showError("Choose a visible, occluded, or out-of-frame state before accepting.");
-        return false;
-      }
-      return savePatch({ quality: "reviewed", label_source: "human_dense_review" });
+      showError("No point to approve. Click the ball, use a hint, or mark it occluded/out.");
+      return false;
+    }
+
+    function acceptReviewed() {
+      return approveExistingPoint({ advance: false });
     }
 
     function markPending() {
@@ -1139,7 +1178,7 @@ APP_HTML = r"""<!doctype html>
         data.points.forEach((point) => { byFrame[point.frame_index] = point; });
         app.suggestions[row.clip_id] = byFrame;
         document.getElementById("cotrackerMeta").textContent =
-          `Loaded ${data.points.length} suggestions. Enter now uses CoTracker, reviews, and advances when a suggestion exists.`;
+          `Loaded ${data.points.length} suggestions. Enter approves the current point; if no point is set, it uses a safe CoTracker suggestion.`;
         render();
         drawOverlay();
       } catch (error) {
@@ -1157,7 +1196,7 @@ APP_HTML = r"""<!doctype html>
         showError("No CoTracker suggestion on this frame.");
         return false;
       }
-      const visibility = Number(suggestion.visibility_score || 0) >= 0.25 ? "visible" : "uncertain";
+      const visibility = suggestionIsAutoSafe(suggestion) ? "visible" : "uncertain";
       const patch = {
         x: suggestion.x,
         y: suggestion.y,

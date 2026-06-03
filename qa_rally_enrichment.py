@@ -17,6 +17,7 @@ import numpy as np
 from detect_atw_overlay import detect_ball, detect_foot, red_ball_mask, shoe_mask
 from full_training_run import read_track_csv, reviewed_stall_events, speed_series
 from paint_hud import detect_bag_center
+from precision_gate import evaluate_precision_gate
 from scan_training_data import video_meta
 from train_multimodal_detector import AudioPeak, Detection, audio_peaks_for_video
 
@@ -1095,6 +1096,35 @@ def filter_quality_events(events: list[dict[str, Any]]) -> tuple[list[dict[str, 
     return kept, suppressed
 
 
+def annotate_precision_gate(event: dict[str, Any]) -> dict[str, Any]:
+    item = dict(event)
+    decision = evaluate_precision_gate(item)
+    item["precision_gate_hard_veto"] = bool(decision.hard_veto)
+    item["precision_gate_soft_flag"] = bool(decision.soft_flag)
+    item["precision_gate_score"] = round(float(decision.score), 4)
+    item["precision_gate_reasons"] = ";".join(decision.reasons)
+    item["precision_gate_hard_reasons"] = ";".join(decision.hard_reasons)
+    item["precision_gate_soft_reasons"] = ";".join(decision.soft_reasons)
+    disagreement = decision.features.get("tracker_disagreement_px")
+    item["precision_gate_tracker_disagreement_px"] = None if disagreement is None else round(float(disagreement), 4)
+    y_ratio_value = decision.features.get("y_ratio")
+    item["precision_gate_y_ratio"] = None if y_ratio_value is None else round(float(y_ratio_value), 4)
+    return item
+
+
+def filter_precision_gate_events(events: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    kept: list[dict[str, Any]] = []
+    suppressed: list[dict[str, Any]] = []
+    for event in sorted(events, key=event_time):
+        item = annotate_precision_gate(event)
+        if not item.get("precision_gate_hard_veto"):
+            kept.append(item)
+            continue
+        item["qa_suppressed_reason"] = f"precision_gate:{item.get('precision_gate_hard_reasons') or item.get('precision_gate_reasons')}"
+        suppressed.append(item)
+    return kept, suppressed
+
+
 def floor_candidate_at(
     cap: cv2.VideoCapture,
     fps: float,
@@ -1550,6 +1580,14 @@ def write_events_csv(events: list[dict[str, Any]], path: Path) -> None:
         "drop_source",
         "drop_score",
         "track_speed",
+        "precision_gate_hard_veto",
+        "precision_gate_soft_flag",
+        "precision_gate_score",
+        "precision_gate_reasons",
+        "precision_gate_hard_reasons",
+        "precision_gate_soft_reasons",
+        "precision_gate_tracker_disagreement_px",
+        "precision_gate_y_ratio",
         "label",
         "note",
     ]
@@ -1654,10 +1692,21 @@ def process_run(run: dict[str, Any], out_root: Path) -> dict[str, Any]:
     hidden_drops = detect_hidden_drops(video, detections, enriched)
     enriched.extend(hidden_drops)
     enriched, suppressed_quality_events = filter_quality_events(enriched)
+    enriched, suppressed_precision_events = filter_precision_gate_events(enriched)
     suppressed_touches.extend([item for item in suppressed_quality_events if item.get("type") == "touch"])
+    suppressed_touches.extend([item for item in suppressed_precision_events if item.get("type") == "touch"])
     enriched.sort(key=event_time)
     enriched, rallies = assign_rallies(enriched)
     enriched.sort(key=event_time)
+    suppressed_events = sorted(
+        [
+            *suppressed_touches,
+            *[item for item in suppressed_quality_events if item.get("type") != "touch"],
+            *[item for item in suppressed_precision_events if item.get("type") != "touch"],
+        ],
+        key=event_time,
+    )
+    suppressed_events = [annotate_precision_gate(item) for item in suppressed_events]
 
     doc = {
         "source_video": video.name,
@@ -1674,6 +1723,10 @@ def process_run(run: dict[str, Any], out_root: Path) -> dict[str, Any]:
             "recovered_touches": len(recovered),
             "suppressed_touch_candidates": len(suppressed_touches),
             "suppressed_drop_candidates": sum(1 for item in suppressed_quality_events if item.get("type") == "drop_floor"),
+            "precision_gate_suppressed_candidates": sum(1 for item in suppressed_events if item.get("precision_gate_hard_veto")),
+            "precision_gate_suppressed_touches": sum(1 for item in suppressed_events if item.get("type") == "touch" and item.get("precision_gate_hard_veto")),
+            "precision_gate_suppressed_drops": sum(1 for item in suppressed_events if item.get("type") == "drop_floor" and item.get("precision_gate_hard_veto")),
+            "precision_gate_soft_flags": sum(1 for item in [*enriched, *suppressed_events] if item.get("precision_gate_soft_flag")),
             "suppressed_stall_candidates": sum(1 for item in suppressed_quality_events if item.get("type") == "stall"),
             "suppressed_trick_candidates": sum(1 for item in suppressed_quality_events if item.get("type") == "around_the_world"),
             "low_ball_accuracy_events": sum(1 for item in enriched if item.get("qa_ball_accuracy") == "low"),
@@ -1682,10 +1735,7 @@ def process_run(run: dict[str, Any], out_root: Path) -> dict[str, Any]:
         },
         "rallies": rallies,
         "events": enriched,
-        "suppressed_events": sorted(
-            [*suppressed_touches, *[item for item in suppressed_quality_events if item.get("type") != "touch"]],
-            key=event_time,
-        ),
+        "suppressed_events": suppressed_events,
     }
     json_path = out_dir / "qa_events.json"
     csv_path = out_dir / "qa_events.csv"

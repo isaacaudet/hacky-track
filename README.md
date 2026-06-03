@@ -76,6 +76,43 @@ flowchart LR
   G --> I["Sprite assets"]
 ```
 
+## Release-Candidate Touch + HUD Pipeline
+
+The current release-candidate path uses fixed OWLv2 detections, L2 trajectory
+features, audio features, and a learned touch classifier. The shipped touch
+output is the merged event-level result, not raw cue candidates.
+
+Refresh the touch pipeline status from the cached OWLv2 detections:
+
+```bash
+python3 run_touch_pipeline.py \
+  --detections-jsonl runs/release-27-public/touch_corpus_v1/owlv2_touch_detections_v1/detections.jsonl \
+  --attach-audio-features
+```
+
+Render release HUD videos from the merged classifier events:
+
+```bash
+python3 render_touch_release_hud.py
+```
+
+That writes HUD event docs, OWLv2/L2 touch-anchor files, MP4 overlays, contact
+sheets, and a preview sheet under:
+
+```text
+runs/release-27-public/touch_corpus_v1/release_touch_hud_v1/
+```
+
+The release-candidate report is:
+
+```text
+TOUCH_RELEASE_CANDIDATE_REPORT.md
+```
+
+Current gate status: merged event-level touch precision/recall passes both
+leave-clips-out CV and frozen-test gates; release HUD verification passes video,
+audio, and nonblank-frame checks.
+
 ## Main Scripts
 
 | Script | Purpose |
@@ -91,6 +128,9 @@ flowchart LR
 | `build_detector_false_positive_review_batch.py` | Mines trained-detector false positives into hard-negative/correction review sheets. |
 | `footbag_detector_inference.py` | Runs a trained footbag detector or precomputed detections and writes a smoothed, auditable ball track. |
 | `summarize_detector_batch.py` | Summarizes detector batch coverage, interpolation share, and per-video failure flags. |
+| `run_touch_pipeline.py` | Runs the fixed-OWLv2 touch-classifier corpus pipeline and release gates. |
+| `render_touch_release_hud.py` | Converts merged classifier touch events into HUD event docs and renders release HUD overlays. |
+| `train_touch_classifier.py` | Trains/evaluates the fused audio + trajectory touch classifier and writes merged event outputs. |
 | `detect_atw_overlay.py` | Experimental footbag/foot heuristic for around-the-world detection. |
 
 ## Quickstart
@@ -114,6 +154,18 @@ Optional detector training dependencies:
 ```bash
 pip install -r requirements-detector.txt
 ```
+
+Optional Moondream open-vocabulary detector spike:
+
+```bash
+pip install -r requirements-moondream.txt
+export MOONDREAM_API_KEY=...
+python3 oracle_detector_spike.py --model moondream --per-clip 0 --out-dir runs/release-27-public/oracle_moondream_v1
+```
+
+Moondream detect returns boxes without confidences, so the spike records a
+synthetic score of `1.0` by default and uses the same dense-label scoring and QA
+sheets as the OWLv2 run.
 
 Process one video into a versioned release run directory:
 
