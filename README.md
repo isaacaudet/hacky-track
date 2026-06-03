@@ -96,11 +96,37 @@ Render release HUD videos from the merged classifier events:
 python3 render_touch_release_hud.py
 ```
 
-That writes HUD event docs, OWLv2/L2 touch-anchor files, MP4 overlays, contact
-sheets, and a preview sheet under:
+That writes HUD event docs, OWLv2/L2 touch-anchor files, reviewed stall/drop
+label badges when available, MP4 overlays, contact sheets, and a preview sheet
+under:
 
 ```text
 runs/release-27-public/touch_corpus_v1/release_touch_hud_v1/
+```
+
+Render a visually corrected release HUD set by applying reviewed output-only
+touch overrides:
+
+```bash
+python3 render_touch_release_hud.py \
+  --out-dir runs/release-27-public/touch_corpus_v1/release_touch_hud_v7_frozen_corrected \
+  --touch-overrides release_overrides/touch_visual_overrides_v1.json
+```
+
+The override file is a release rendering artifact, not classifier training data.
+Reports should show both model-only and visually corrected HUD results.
+
+Audit rally stats and exact missed/fake touch times from a rendered HUD set:
+
+```bash
+python3 release_rally_analytics.py
+```
+
+Check whether side/contact-type classification has enough labels and pose
+features to train:
+
+```bash
+python3 train_release_contact_classifier.py
 ```
 
 The release-candidate report is:
@@ -130,7 +156,10 @@ audio, and nonblank-frame checks.
 | `summarize_detector_batch.py` | Summarizes detector batch coverage, interpolation share, and per-video failure flags. |
 | `run_touch_pipeline.py` | Runs the fixed-OWLv2 touch-classifier corpus pipeline and release gates. |
 | `render_touch_release_hud.py` | Converts merged classifier touch events into HUD event docs and renders release HUD overlays. |
+| `release_rally_analytics.py` | Summarizes rendered release rallies and reports exact false-positive/missed touch times against visual labels. |
+| `release_event_error_audit.py` | Renders visual strips for remaining merged-event FP/FN cases with frames, ball-track graph, audio, and trajectory cues. |
 | `train_touch_classifier.py` | Trains/evaluates the fused audio + trajectory touch classifier and writes merged event outputs. |
+| `train_release_contact_classifier.py` | Separate readiness/eval gate for left/right/contact-type labels using pose proximity when labels/features exist. |
 | `detect_atw_overlay.py` | Experimental footbag/foot heuristic for around-the-world detection. |
 
 ## Quickstart
@@ -707,8 +736,11 @@ What works:
 What is still in progress:
 
 - robust automatic footbag tracking across new users' clips
-- reliable side/contact-type/knee classification
-- higher-recall stall and trick detection
+- reliable side/contact-type/knee classification; the release contact classifier
+  currently needs reviewed contact labels and pose columns before it can train
+- automatic stall/drop detection; release HUD can render reviewed stall/drop
+  labels, but the OWLv2 release path does not infer them yet
+- higher-recall trick detection
 - active learning for likely missed events
 - fresh-clone release testing on more machines
 

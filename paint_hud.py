@@ -724,6 +724,24 @@ def draw_effect_lines(frame: np.ndarray, center: tuple[int, int], age: float, ke
     overlay_rgba(frame, effect, 0, 0)
 
 
+def contact_badge_text(event: Event) -> str | None:
+    raw = event.label.strip()
+    if not raw or raw in {"release_touch", "touch", "unknown", "generic"}:
+        return None
+    normalized = raw.replace("_", " ").replace("-", " ").strip().upper()
+    aliases = {
+        "LEFT": "L",
+        "RIGHT": "R",
+        "LEFT FOOT": "L FOOT",
+        "RIGHT FOOT": "R FOOT",
+        "LEFT KICK": "L KICK",
+        "RIGHT KICK": "R KICK",
+        "KNEE": "KNEE",
+        "STALL": "STALL",
+    }
+    return aliases.get(normalized, normalized[:12])
+
+
 def tag_position(
     center: tuple[int, int],
     tag_shape: tuple[int, int, int],
@@ -842,6 +860,10 @@ def draw_hud(
                 tag = assets.chip("+1", YELLOW, BLACK, s(32))
                 tag_x, tag_y = tag_position(center, tag.shape, frame.shape, scale_ui)
                 overlay_rgba(frame, tag, tag_x, tag_y, 1.0)
+                badge_text = contact_badge_text(event)
+                if badge_text:
+                    badge = assets.chip(badge_text, CYAN, BLACK, s(18))
+                    overlay_rgba(frame, badge, tag_x, tag_y + tag.shape[0] + s(5), 1.0)
         elif event.type == "stall":
             center = event_center(event, frame.shape, anchors, auto_centers)
             draw_effect_lines(frame, center, age, event_key(event), stall=True)

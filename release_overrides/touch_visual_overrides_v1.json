@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "created_by": "assistant_visual_audit",
+  "note": "Manual visual corrections for release HUD rendering only. These are not model-training labels and are not used for classifier gate metrics.",
+  "video_overrides": {
+    "video-68_singular_display": {
+      "source": "release_touch_hud_v5_event_error_audit",
+      "reason": "Two remaining model events were visually audited as loud-footstep/ball-motion false positives.",
+      "remove_touch_times_sec": [
+        4.330667,
+        19.786667
+      ],
+      "add_touch_times_sec": []
+    }
+  }
+}

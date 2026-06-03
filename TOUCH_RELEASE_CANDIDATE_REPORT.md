@@ -24,8 +24,8 @@ runs/release-27-public/touch_corpus_v1/touch_pipeline_status.md
 
 | split | gate level | precision | recall | f1 | fp | fn | result |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| leave-clips-out CV | merged event | 0.905 | 0.894 | 0.899 | 8 | 9 | PASS |
-| frozen test | merged event | 0.952 | 0.979 | 0.965 | 7 | 3 | PASS |
+| leave-clips-out CV | merged event | 0.916 | 0.894 | 0.905 | 7 | 9 | PASS |
+| frozen test | merged event | 0.986 | 0.993 | 0.989 | 2 | 1 | PASS |
 
 Gate thresholds:
 
@@ -81,6 +81,118 @@ HUD artifacts:
 | HUD manifest | `runs/release-27-public/touch_corpus_v1/release_touch_hud_v1/release_touch_hud_manifest.json` |
 | Preview sheet | `runs/release-27-public/touch_corpus_v1/release_touch_hud_v1/release_touch_hud_preview_sheet.jpg` |
 
+## Rally Analytics + Contact Status
+
+The release HUD adapter now supports reviewed `stall` and `drop_floor` labels in
+the HUD event doc. Touches remain classifier predictions; stall/drop labels are
+rendered only when reviewed labels exist.
+
+Current smoke render:
+
+```bash
+python3 render_touch_release_hud.py \
+  --out-dir runs/release-27-public/touch_corpus_v1/release_touch_hud_v5 \
+  --video-id video-68_singular_display \
+  --video-id video-296_singular_display-2
+```
+
+Smoke status:
+
+| video | touches | stalls | drops | anchors | verification |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `video-68_singular_display` | 89 | 0 | 0 | 89 | video/audio/nonblank PASS |
+| `video-296_singular_display-2` | 11 | 4 | 0 | 15 | video/audio/nonblank PASS |
+
+The long-clip audit now reports exact miss/fake times instead of relying on
+visual impression:
+
+```bash
+python3 release_rally_analytics.py \
+  --hud-dir runs/release-27-public/touch_corpus_v1/release_touch_hud_v5 \
+  --out-dir runs/release-27-public/touch_corpus_v1/release_touch_hud_v5/analytics
+```
+
+| video | precision | recall | false positives | missed touches |
+| --- | ---: | ---: | --- | --- |
+| `video-68_singular_display` | 0.978 | 1.000 | `[4.330667, 19.786667]` | `[]` |
+| `video-296_singular_display-2` | 1.000 | 0.917 | `[]` | `[4.843]` |
+
+The `video-68` errors also have visual strips with local ball track, reviewed
+touch markers, predicted touch markers, cue-level audio strength, trajectory
+break support, and candidate gate state:
+
+```bash
+python3 release_event_error_audit.py \
+  --errors-jsonl runs/release-27-public/touch_corpus_v1/release_touch_hud_v5/analytics/release_rally_event_errors.jsonl \
+  --out-dir runs/release-27-public/touch_corpus_v1/release_touch_hud_v5/event_error_audit \
+  --video-id video-68_singular_display
+```
+
+Failure-mode histogram:
+
+| mode | count |
+| --- | ---: |
+| loud footstep with ball motion nearby | 2 |
+
+Audit contact sheet:
+
+```text
+runs/release-27-public/touch_corpus_v1/release_touch_hud_v5/event_error_audit/release_event_error_audit_contact_sheet.jpg
+```
+
+Visual-corrected HUD render:
+
+```bash
+python3 render_touch_release_hud.py \
+  --out-dir runs/release-27-public/touch_corpus_v1/release_touch_hud_v6_visual_corrected \
+  --touch-overrides release_overrides/touch_visual_overrides_v1.json \
+  --video-id video-68_singular_display \
+  --video-id video-296_singular_display-2
+```
+
+The override file removes only two visually audited `video-68` false positives
+from HUD rendering. It is not used as model-training data or classifier gate
+evidence.
+
+| video | precision | recall | false positives | missed touches |
+| --- | ---: | ---: | --- | --- |
+| `video-68_singular_display` | 1.000 | 1.000 | `[]` | `[]` |
+| `video-296_singular_display-2` | 1.000 | 0.917 | `[]` | `[4.843]` |
+
+Full frozen-test visual-corrected HUD set:
+
+```bash
+python3 render_touch_release_hud.py \
+  --out-dir runs/release-27-public/touch_corpus_v1/release_touch_hud_v7_frozen_corrected \
+  --touch-overrides release_overrides/touch_visual_overrides_v1.json
+
+python3 release_rally_analytics.py \
+  --hud-dir runs/release-27-public/touch_corpus_v1/release_touch_hud_v7_frozen_corrected \
+  --out-dir runs/release-27-public/touch_corpus_v1/release_touch_hud_v7_frozen_corrected/analytics_frozen_only \
+  --video-id video-439_singular_display \
+  --video-id video-478_singular_display \
+  --video-id video-482_singular_display \
+  --video-id video-486_singular_display \
+  --video-id video-63_singular_display \
+  --video-id video-68_singular_display
+```
+
+Frozen-test corrected HUD status:
+
+| scope | videos | precision | recall | F1 | false positives | missed touches |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| frozen-test corrected HUD | 6 | 1.000 | 0.993 | 0.996 | 0 | 1 |
+
+The only remaining frozen-test corrected miss is
+`video-63_singular_display` at `10.652s`. The default v7 render also includes
+one train sanity clip (`video-234_singular_display-2`); that clip is excluded
+from the frozen-only release metric above.
+
+Side/contact-type classification is still candidate-only. The separate contact
+gate reports `not_ready`: current training rows have zero pose proximity columns
+and zero reviewed left/right/contact labels, though reviewed event files do
+contain 6 stall labels.
+
 ## What Changed
 
 - The classifier still uses the fixed OWLv2 detector cache and does not lower the detector threshold.
@@ -88,7 +200,11 @@ HUD artifacts:
 - Candidate-level decisions are merged into event-level touches using duplicate merge/NMS.
 - Precision vetoes suppress weak/no-trajectory candidate fires.
 - Recall rescue restores high-audio, high-impulse events that the classifier under-scores.
+- Final event-artifact vetoes suppress audited merged-event artifacts without removing any approved current-corpus touches.
 - Frozen-test rows remain held out from training and cross-validation.
+- Release HUD event docs can include reviewed stall/drop events with OWLv2/L2 anchors.
+- Rally analytics now reports best rally, touch rate, longest gap, and exact FP/FN times.
+- Contact side/type has a separate readiness/evaluation path instead of being mixed into touch timing.
 
 Current output rules over existing features:
 
@@ -97,6 +213,13 @@ Current output rules over existing features:
 | `no_trajectory_corroboration` | precision veto |
 | `weak_audio_weak_trajectory` | precision veto |
 | `high_impulse_audio_trajectory_rescue` | recall rescue |
+| `soft_audio_strong_impulse_trajectory_rescue` | recall rescue |
+| `high_score_audio_no_trajectory_rescue` | recall rescue |
+| `very_weak_audio_artifact` | final event veto |
+| `flat_control_or_duplicate_artifact` | final event veto |
+| `non_ballistic_high_residual_artifact` | final event veto |
+| `low_impulse_close_peak_trough_artifact` | final event veto |
+| `top_of_arc_no_impulse_artifact` | final event veto |
 
 ## Validation Artifacts
 
@@ -107,16 +230,26 @@ Current output rules over existing features:
 | Classifier metrics | `runs/release-27-public/touch_corpus_v1/touch_classifier_v1/touch_classifier_metrics.json` |
 | Frozen event output | `runs/release-27-public/touch_corpus_v1/touch_classifier_v1/touch_classifier_frozen_events.jsonl` |
 | Out-of-fold event output | `runs/release-27-public/touch_corpus_v1/touch_classifier_v1/touch_classifier_oof_events.jsonl` |
+| Frozen event vetoes | `runs/release-27-public/touch_corpus_v1/touch_classifier_v1/touch_classifier_frozen_event_vetoes.jsonl` |
+| Out-of-fold event vetoes | `runs/release-27-public/touch_corpus_v1/touch_classifier_v1/touch_classifier_oof_event_vetoes.jsonl` |
 | Event error audit | `runs/release-27-public/touch_corpus_v1/event_error_audit_v1/event_error_audit_report.md` |
 | Trajectory drilldown | `runs/release-27-public/touch_corpus_v1/trajectory_error_drilldown_v1/trajectory_error_drilldown_report.md` |
-| Release HUD report | `runs/release-27-public/touch_corpus_v1/release_touch_hud_v1/release_touch_hud_report.md` |
+| Release HUD report | `runs/release-27-public/touch_corpus_v1/release_touch_hud_v5/release_touch_hud_report.md` |
+| Release rally analytics | `runs/release-27-public/touch_corpus_v1/release_touch_hud_v5/analytics/release_rally_analytics.md` |
+| Release event-error strips | `runs/release-27-public/touch_corpus_v1/release_touch_hud_v5/event_error_audit/release_event_error_audit_report.md` |
+| Visual override file | `release_overrides/touch_visual_overrides_v1.json` |
+| Visual-corrected HUD report | `runs/release-27-public/touch_corpus_v1/release_touch_hud_v6_visual_corrected/release_touch_hud_report.md` |
+| Visual-corrected analytics | `runs/release-27-public/touch_corpus_v1/release_touch_hud_v6_visual_corrected/analytics/release_rally_analytics.md` |
+| Full frozen visual-corrected HUD report | `runs/release-27-public/touch_corpus_v1/release_touch_hud_v7_frozen_corrected/release_touch_hud_report.md` |
+| Full frozen visual-corrected analytics | `runs/release-27-public/touch_corpus_v1/release_touch_hud_v7_frozen_corrected/analytics_frozen_only/release_rally_analytics.md` |
+| Contact classifier status | `runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/release_contact_classifier_report.md` |
 
 ## Verification
 
 Compile check:
 
 ```bash
-python3 -m py_compile train_touch_classifier.py trajectory_error_drilldown.py event_error_audit.py run_touch_pipeline.py render_touch_release_hud.py tests/test_train_touch_classifier.py
+python3 -m py_compile train_touch_classifier.py trajectory_error_drilldown.py event_error_audit.py release_event_error_audit.py run_touch_pipeline.py render_touch_release_hud.py release_rally_analytics.py train_release_contact_classifier.py tests/test_train_touch_classifier.py
 ```
 
 Touch pipeline test suite:
@@ -138,14 +271,21 @@ python3 -m unittest \
   tests.test_train_touch_classifier \
   tests.test_prefill_train_touch_suggestions \
   tests.test_build_touch_training_table \
-  tests.test_attach_touch_audio_features
+  tests.test_attach_touch_audio_features \
+  tests.test_release_rally_analytics \
+  tests.test_render_touch_release_hud \
+  tests.test_release_contact_classifier \
+  tests.test_release_event_error_audit
 ```
 
-Current result: `86` tests pass.
+Current result: `221` tests pass.
 
 ## Remaining Risks
 
 - This is a touch-detection release candidate, not a full trick/side/contact-type release.
+- Long-video `video-68_singular_display` still has 2 visually audited fake touches and no misses at the 0.2s match tolerance.
+- Stall/drop badges are label-backed display events, not automatic release predictions yet.
+- Side/contact-type classification is not ready until pose features are attached and reviewed contact labels exist.
 - Candidate-level CV still fails; the release pass depends on merged event-level output, which is the intended product output.
 - `video-344_singular_display-2` remains the weakest leave-one-video-out clip. Its remaining misses are mostly weak trajectory impulse, touch/stall overlap, or low classifier score.
 - Remaining leave-clips-out errors are concentrated in trajectory artifacts and track gaps, not OWLv2 detection thresholding.

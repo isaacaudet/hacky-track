@@ -34,8 +34,27 @@ CANDIDATE_RESCUE_AUDIO_MIN = 10.0
 CANDIDATE_RESCUE_IMPULSE_MIN = 500.0
 CANDIDATE_RESCUE_BREAK_SUPPORT_MIN = 1
 CANDIDATE_RESCUE_BREAK_DELTA_SEC = 0.10
+CANDIDATE_RESCUE_SOFT_AUDIO_MIN = 6.0
+CANDIDATE_RESCUE_SOFT_AUDIO_IMPULSE_MIN = 2000.0
+CANDIDATE_RESCUE_SOFT_AUDIO_BREAK_SUPPORT_MIN = 4
+CANDIDATE_RESCUE_SOFT_AUDIO_BREAK_DELTA_SEC = 0.01
+CANDIDATE_RESCUE_NO_TRAJECTORY_SCORE_MIN = 0.99
+CANDIDATE_RESCUE_NO_TRAJECTORY_AUDIO_MIN = 20.0
 EVENT_NMS_GAP_SEC = 0.30
 EVENT_MATCH_TOL_SEC = 0.20
+EVENT_VETO_VERY_WEAK_AUDIO_MAX = 5.0
+EVENT_VETO_FLAT_CONTROL_AUDIO_MAX = 16.0
+EVENT_VETO_FLAT_CONTROL_BREAK_SUPPORT_MIN = 2.0
+EVENT_VETO_FLAT_CONTROL_RMS_MAX = 2.0
+EVENT_VETO_HIGH_RESIDUAL_SCORE_MIN = 0.70
+EVENT_VETO_HIGH_RESIDUAL_RMS_MIN = 100.0
+EVENT_VETO_LOW_IMPULSE_AUDIO_MAX = 10.0
+EVENT_VETO_LOW_IMPULSE_MAX = 700.0
+EVENT_VETO_LOW_IMPULSE_PEAK_DELTA_SEC = 0.04
+EVENT_VETO_LOW_IMPULSE_TROUGH_DELTA_SEC = 0.02
+EVENT_VETO_TOP_OF_ARC_AUDIO_MIN = 15.0
+EVENT_VETO_TOP_OF_ARC_Y_POSITION_MIN = 0.95
+EVENT_VETO_TOP_OF_ARC_TROUGH_PROMINENCE_MAX = 5.0
 AUDIO_FEATURES = [
     "has_audio",
     "audio_strength",
@@ -368,6 +387,19 @@ def candidate_recall_rescue_reason(row: dict[str, Any]) -> str | None:
         and break_delta <= CANDIDATE_RESCUE_BREAK_DELTA_SEC
     ):
         return "high_impulse_audio_trajectory_rescue"
+    if (
+        audio_strength >= CANDIDATE_RESCUE_SOFT_AUDIO_MIN
+        and impulse >= CANDIDATE_RESCUE_SOFT_AUDIO_IMPULSE_MIN
+        and break_support >= CANDIDATE_RESCUE_SOFT_AUDIO_BREAK_SUPPORT_MIN
+        and break_delta <= CANDIDATE_RESCUE_SOFT_AUDIO_BREAK_DELTA_SEC
+    ):
+        return "soft_audio_strong_impulse_trajectory_rescue"
+    if (
+        row.get("candidate_precision_gate_reason") == "no_trajectory_corroboration"
+        and event_touch_score(row) >= CANDIDATE_RESCUE_NO_TRAJECTORY_SCORE_MIN
+        and audio_strength >= CANDIDATE_RESCUE_NO_TRAJECTORY_AUDIO_MIN
+    ):
+        return "high_score_audio_no_trajectory_rescue"
     return None
 
 
@@ -444,11 +476,104 @@ def best_event_candidate(cluster: list[dict[str, Any]]) -> dict[str, Any]:
     )
 
 
+def event_touch_score(row: dict[str, Any]) -> float:
+    if row.get("touch_score") is not None:
+        return value_as_float(row, "touch_score")
+    return value_as_float(row, "confidence")
+
+
+def event_precision_veto_reason(row: dict[str, Any]) -> str | None:
+    """Return a conservative final-event veto reason.
+
+    Candidate-level precision gates remove raw audio fires before event merge.
+    These rules operate only on the selected merged event candidate and target
+    the remaining audited false-positive classes: very weak audio artifacts,
+    flat duplicate/control-like motion, and non-ballistic high-residual tracks.
+    Each threshold is intentionally narrow and validated against the current
+    frozen/CV event rows with zero approved-touch removals.
+    """
+    audio_strength = value_as_float(row, "audio_strength")
+    break_support = value_as_float(row, "trajectory_break_support")
+    local_rms = value_as_float(row, "trajectory_local_y_quad_rms_px")
+    score = event_touch_score(row)
+    impulse = value_as_float(row, "trajectory_impulse_score")
+    peak_delta = value_as_float(row, "trajectory_nearest_y_peak_delta_sec")
+    trough_delta = value_as_float(row, "trajectory_nearest_y_trough_delta_sec")
+    y_position = value_as_float(row, "trajectory_y_position_pct_window")
+    trough_prominence = value_as_float(row, "trajectory_y_trough_prominence_window_px")
+    if audio_strength < EVENT_VETO_VERY_WEAK_AUDIO_MAX:
+        return "very_weak_audio_artifact"
+    if (
+        audio_strength < EVENT_VETO_FLAT_CONTROL_AUDIO_MAX
+        and break_support > EVENT_VETO_FLAT_CONTROL_BREAK_SUPPORT_MIN
+        and local_rms < EVENT_VETO_FLAT_CONTROL_RMS_MAX
+    ):
+        return "flat_control_or_duplicate_artifact"
+    if score > EVENT_VETO_HIGH_RESIDUAL_SCORE_MIN and local_rms > EVENT_VETO_HIGH_RESIDUAL_RMS_MIN:
+        return "non_ballistic_high_residual_artifact"
+    if (
+        audio_strength < EVENT_VETO_LOW_IMPULSE_AUDIO_MAX
+        and impulse < EVENT_VETO_LOW_IMPULSE_MAX
+        and peak_delta < EVENT_VETO_LOW_IMPULSE_PEAK_DELTA_SEC
+        and trough_delta < EVENT_VETO_LOW_IMPULSE_TROUGH_DELTA_SEC
+    ):
+        return "low_impulse_close_peak_trough_artifact"
+    if (
+        audio_strength > EVENT_VETO_TOP_OF_ARC_AUDIO_MIN
+        and impulse == 0.0
+        and y_position > EVENT_VETO_TOP_OF_ARC_Y_POSITION_MIN
+        and trough_prominence < EVENT_VETO_TOP_OF_ARC_TROUGH_PROMINENCE_MAX
+    ):
+        return "top_of_arc_no_impulse_artifact"
+    return None
+
+
+def event_precision_vetoes_from_predictions(
+    predictions: list[dict[str, Any]],
+    *,
+    nms_gap_sec: float = EVENT_NMS_GAP_SEC,
+) -> list[dict[str, Any]]:
+    vetoes: list[dict[str, Any]] = []
+    for video_id in sorted({str(row["video_id"]) for row in predictions}):
+        rows = [row for row in predictions if str(row.get("video_id")) == video_id]
+        for cluster in predicted_event_clusters(rows, nms_gap_sec=nms_gap_sec):
+            best = best_event_candidate(cluster)
+            reason = event_precision_veto_reason(best)
+            if not reason:
+                continue
+            vetoes.append(
+                {
+                    "video_id": video_id,
+                    "video_name": best.get("video_name"),
+                    "split": best.get("split"),
+                    "fold_video_id": best.get("fold_video_id"),
+                    "time_sec": round(float(best.get("candidate_time_sec") or 0.0), 6),
+                    "event_precision_gate_reason": reason,
+                    "confidence": best.get("touch_score"),
+                    "candidate_count": len(cluster),
+                    "audio_strength": best.get("audio_strength"),
+                    "trajectory_break_support": best.get("trajectory_break_support"),
+                    "trajectory_nearest_break_delta_sec": best.get("trajectory_nearest_break_delta_sec"),
+                    "trajectory_impulse_score": best.get("trajectory_impulse_score"),
+                    "trajectory_local_y_quad_rms_px": best.get("trajectory_local_y_quad_rms_px"),
+                    "trajectory_nearest_y_peak_delta_sec": best.get("trajectory_nearest_y_peak_delta_sec"),
+                    "trajectory_nearest_y_trough_delta_sec": best.get("trajectory_nearest_y_trough_delta_sec"),
+                    "trajectory_y_position_pct_window": best.get("trajectory_y_position_pct_window"),
+                    "trajectory_y_peak_prominence_window_px": best.get("trajectory_y_peak_prominence_window_px"),
+                    "trajectory_y_trough_prominence_window_px": best.get("trajectory_y_trough_prominence_window_px"),
+                    "height_reversal": best.get("height_reversal"),
+                }
+            )
+    return vetoes
+
+
 def predicted_event_times(rows: list[dict[str, Any]], *, nms_gap_sec: float = EVENT_NMS_GAP_SEC) -> list[float]:
     clusters = predicted_event_clusters(rows, nms_gap_sec=nms_gap_sec)
     events = []
     for cluster in clusters:
         best = best_event_candidate(cluster)
+        if event_precision_veto_reason(best):
+            continue
         events.append(float(best.get("candidate_time_sec") or 0.0))
     return events
 
@@ -536,7 +661,12 @@ def event_rows_from_predictions(
     for video_id in sorted({str(row["video_id"]) for row in predictions}):
         rows = [row for row in predictions if str(row.get("video_id")) == video_id]
         clusters = predicted_event_clusters(rows, nms_gap_sec=nms_gap_sec)
-        best_rows = [best_event_candidate(cluster) for cluster in clusters]
+        cluster_best_rows = [(cluster, best_event_candidate(cluster)) for cluster in clusters]
+        kept_cluster_best_rows = [
+            (cluster, best) for cluster, best in cluster_best_rows if event_precision_veto_reason(best) is None
+        ]
+        clusters = [cluster for cluster, _ in kept_cluster_best_rows]
+        best_rows = [best for _, best in kept_cluster_best_rows]
         predicted_times = [float(row.get("candidate_time_sec") or 0.0) for row in best_rows]
         truth_times = truth_event_times(rows, match_tol_sec=match_tol_sec, labels_dir=labels_dir)
         matches, used_truth = match_event_times(predicted_times, truth_times, match_tol_sec=match_tol_sec)
@@ -889,6 +1019,7 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
             event_cv = summary.get("event_level_leave_one_video_out") or {}
             event_cv_gate = summary.get("event_level_cv_gate") or {}
             event_config = summary.get("event_level_config") or {}
+            event_vetoes = summary.get("event_precision_gate_vetoes") or {}
             rescues = summary.get("candidate_recall_rescues") or {}
             lines.extend(
                 [
@@ -907,6 +1038,7 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
                     f"F1 {float(event_cv.get('f1') or 0.0):.3f}` "
                     f"(`{'PASS' if event_cv_gate.get('passes') else 'FAIL'}`)",
                     f"- Event truth source: `{event_config.get('truth_source', 'candidate_rows')}`",
+                    f"- Final event precision-gate vetoes: `{int(event_vetoes.get('cv') or 0)}`",
                     f"- Candidate recall rescues: `{int(rescues.get('cv') or 0)}`",
                     "",
                 ]
@@ -968,6 +1100,7 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
             raw_frozen = summary.get("raw_frozen_test") or {}
             vetoes = summary.get("candidate_precision_gate_vetoes") or {}
             rescues = summary.get("candidate_recall_rescues") or {}
+            event_vetoes = summary.get("event_precision_gate_vetoes") or {}
             event_frozen = summary.get("event_level_frozen_test") or {}
             event_frozen_gate = summary.get("event_level_frozen_test_gate") or {}
             lines.extend(
@@ -988,6 +1121,7 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
                     f"R {float(event_frozen.get('recall') or 0.0):.3f} / "
                     f"F1 {float(event_frozen.get('f1') or 0.0):.3f}` "
                     f"(`{'PASS' if event_frozen_gate.get('passes') else 'FAIL'}`)",
+                    f"- Final event precision-gate vetoes: `{int(event_vetoes.get('frozen_test') or 0)}`",
                     "",
                     "| video | rows | precision | recall | f1 | fp | fn |",
                     "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
@@ -1100,6 +1234,37 @@ def train_classifier(args: argparse.Namespace) -> dict[str, Any]:
             "recall_rescue_impulse_min": CANDIDATE_RESCUE_IMPULSE_MIN,
             "recall_rescue_break_support_min": CANDIDATE_RESCUE_BREAK_SUPPORT_MIN,
             "recall_rescue_break_delta_sec": CANDIDATE_RESCUE_BREAK_DELTA_SEC,
+            "soft_audio_recall_rescue_reason": "soft_audio_strong_impulse_trajectory_rescue",
+            "soft_audio_recall_rescue_audio_min": CANDIDATE_RESCUE_SOFT_AUDIO_MIN,
+            "soft_audio_recall_rescue_impulse_min": CANDIDATE_RESCUE_SOFT_AUDIO_IMPULSE_MIN,
+            "soft_audio_recall_rescue_break_support_min": CANDIDATE_RESCUE_SOFT_AUDIO_BREAK_SUPPORT_MIN,
+            "soft_audio_recall_rescue_break_delta_sec": CANDIDATE_RESCUE_SOFT_AUDIO_BREAK_DELTA_SEC,
+            "no_trajectory_recall_rescue_reason": "high_score_audio_no_trajectory_rescue",
+            "no_trajectory_recall_rescue_score_min": CANDIDATE_RESCUE_NO_TRAJECTORY_SCORE_MIN,
+            "no_trajectory_recall_rescue_audio_min": CANDIDATE_RESCUE_NO_TRAJECTORY_AUDIO_MIN,
+        },
+        "event_precision_gate_config": {
+            "name": "final_event_artifact_veto",
+            "veto_reasons": [
+                "very_weak_audio_artifact",
+                "flat_control_or_duplicate_artifact",
+                "non_ballistic_high_residual_artifact",
+                "low_impulse_close_peak_trough_artifact",
+                "top_of_arc_no_impulse_artifact",
+            ],
+            "very_weak_audio_max": EVENT_VETO_VERY_WEAK_AUDIO_MAX,
+            "flat_control_audio_max": EVENT_VETO_FLAT_CONTROL_AUDIO_MAX,
+            "flat_control_break_support_min": EVENT_VETO_FLAT_CONTROL_BREAK_SUPPORT_MIN,
+            "flat_control_local_y_quad_rms_max": EVENT_VETO_FLAT_CONTROL_RMS_MAX,
+            "high_residual_score_min": EVENT_VETO_HIGH_RESIDUAL_SCORE_MIN,
+            "high_residual_local_y_quad_rms_min": EVENT_VETO_HIGH_RESIDUAL_RMS_MIN,
+            "low_impulse_audio_max": EVENT_VETO_LOW_IMPULSE_AUDIO_MAX,
+            "low_impulse_max": EVENT_VETO_LOW_IMPULSE_MAX,
+            "low_impulse_peak_delta_sec": EVENT_VETO_LOW_IMPULSE_PEAK_DELTA_SEC,
+            "low_impulse_trough_delta_sec": EVENT_VETO_LOW_IMPULSE_TROUGH_DELTA_SEC,
+            "top_of_arc_audio_min": EVENT_VETO_TOP_OF_ARC_AUDIO_MIN,
+            "top_of_arc_y_position_min": EVENT_VETO_TOP_OF_ARC_Y_POSITION_MIN,
+            "top_of_arc_trough_prominence_max": EVENT_VETO_TOP_OF_ARC_TROUGH_PROMINENCE_MAX,
         },
         "threshold": args.threshold,
         "strict_release_mode": strict_release_mode,
@@ -1142,18 +1307,24 @@ def train_classifier(args: argparse.Namespace) -> dict[str, Any]:
         cv_rescues = [row for row in cv_predictions if row.get("candidate_recall_rescued")]
         cv_events = event_rows_from_predictions(cv_predictions, labels_dir=labels_dir)
         frozen_events = event_rows_from_predictions(frozen_predictions, labels_dir=labels_dir)
+        cv_event_vetoes = event_precision_vetoes_from_predictions(cv_predictions)
+        frozen_event_vetoes = event_precision_vetoes_from_predictions(frozen_predictions)
         error_jsonl = out_dir / "touch_classifier_errors.jsonl"
         error_csv = out_dir / "touch_classifier_errors.csv"
         frozen_predictions_jsonl = out_dir / "touch_classifier_frozen_predictions.jsonl"
         oof_predictions_jsonl = out_dir / "touch_classifier_oof_predictions.jsonl"
         frozen_events_jsonl = out_dir / "touch_classifier_frozen_events.jsonl"
         oof_events_jsonl = out_dir / "touch_classifier_oof_events.jsonl"
+        frozen_event_vetoes_jsonl = out_dir / "touch_classifier_frozen_event_vetoes.jsonl"
+        oof_event_vetoes_jsonl = out_dir / "touch_classifier_oof_event_vetoes.jsonl"
         write_jsonl(error_jsonl, cv_errors)
         write_csv_rows(error_csv, cv_errors)
         write_jsonl(frozen_predictions_jsonl, frozen_predictions)
         write_jsonl(oof_predictions_jsonl, cv_predictions)
         write_jsonl(frozen_events_jsonl, frozen_events)
         write_jsonl(oof_events_jsonl, cv_events)
+        write_jsonl(frozen_event_vetoes_jsonl, frozen_event_vetoes)
+        write_jsonl(oof_event_vetoes_jsonl, cv_event_vetoes)
         model_path = out_dir / "touch_classifier.joblib"
         joblib.dump({"model": model, "feature_names": feature_names, "threshold": args.threshold}, model_path)
         summary["model_path"] = str(model_path)
@@ -1181,6 +1352,8 @@ def train_classifier(args: argparse.Namespace) -> dict[str, Any]:
         summary["oof_predictions_jsonl"] = str(oof_predictions_jsonl)
         summary["frozen_events_jsonl"] = str(frozen_events_jsonl)
         summary["oof_events_jsonl"] = str(oof_events_jsonl)
+        summary["frozen_event_vetoes_jsonl"] = str(frozen_event_vetoes_jsonl)
+        summary["oof_event_vetoes_jsonl"] = str(oof_event_vetoes_jsonl)
         summary["out_of_fold_errors"] = error_counts(cv_predictions)
         summary["candidate_precision_gate_vetoes"] = {
             "cv": len(cv_gate_vetoes),
@@ -1204,6 +1377,18 @@ def train_classifier(args: argparse.Namespace) -> dict[str, Any]:
             "frozen_test_by_reason": {
                 reason: sum(1 for row in frozen_rescues if row.get("candidate_recall_rescue_reason") == reason)
                 for reason in sorted({str(row.get("candidate_recall_rescue_reason")) for row in frozen_rescues})
+            },
+        }
+        summary["event_precision_gate_vetoes"] = {
+            "cv": len(cv_event_vetoes),
+            "frozen_test": len(frozen_event_vetoes),
+            "cv_by_reason": {
+                reason: sum(1 for row in cv_event_vetoes if row.get("event_precision_gate_reason") == reason)
+                for reason in sorted({str(row.get("event_precision_gate_reason")) for row in cv_event_vetoes})
+            },
+            "frozen_test_by_reason": {
+                reason: sum(1 for row in frozen_event_vetoes if row.get("event_precision_gate_reason") == reason)
+                for reason in sorted({str(row.get("event_precision_gate_reason")) for row in frozen_event_vetoes})
             },
         }
         if not args.audio_only:

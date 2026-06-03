@@ -56,6 +56,7 @@ class TrainTouchClassifierTests(unittest.TestCase):
                     "trajectory_max_positive_dvy": 200.0 if label else 0.0,
                     "height_reversal": label,
                     "detector_confidence_near_candidate": 0.4,
+                    "trajectory_local_y_quad_rms_px": 12.0,
                 }
             )
         return row
@@ -224,6 +225,44 @@ class TrainTouchClassifierTests(unittest.TestCase):
         self.assertFalse(gated["candidate_recall_rescued"])
         self.assertIsNone(gated["candidate_recall_rescue_reason"])
 
+    def test_candidate_recall_rescue_adds_soft_audio_strong_impulse_candidate(self) -> None:
+        prediction = {
+            **self.row("heldout", 1.0, True, split="test_frozen"),
+            "predicted_is_touch": False,
+            "touch_score": 0.70,
+            "error_type": "false_negative",
+            "audio_strength": 6.2,
+            "trajectory_break_support": 4,
+            "trajectory_nearest_break_delta_sec": 0.004,
+            "trajectory_impulse_score": 2400.0,
+        }
+
+        gated = trainer.apply_candidate_precision_gate([prediction])[0]
+
+        self.assertTrue(gated["predicted_is_touch"])
+        self.assertTrue(gated["candidate_recall_rescued"])
+        self.assertEqual(gated["candidate_recall_rescue_reason"], "soft_audio_strong_impulse_trajectory_rescue")
+        self.assertEqual(gated["error_type"], "true_positive")
+
+    def test_candidate_recall_rescue_adds_high_score_audio_no_trajectory_candidate(self) -> None:
+        prediction = {
+            **self.row("heldout", 1.0, True, split="test_frozen"),
+            "predicted_is_touch": True,
+            "touch_score": 0.995,
+            "error_type": "true_positive",
+            "audio_strength": 21.0,
+            "trajectory_break_support": 0,
+            "trajectory_nearest_break_delta_sec": 0.80,
+        }
+
+        gated = trainer.apply_candidate_precision_gate([prediction])[0]
+
+        self.assertTrue(gated["predicted_is_touch"])
+        self.assertTrue(gated["candidate_recall_rescued"])
+        self.assertEqual(gated["candidate_precision_gate_reason"], "no_trajectory_corroboration")
+        self.assertEqual(gated["candidate_recall_rescue_reason"], "high_score_audio_no_trajectory_rescue")
+        self.assertEqual(gated["error_type"], "true_positive")
+
     def test_event_metrics_merge_duplicate_predicted_candidates(self) -> None:
         predictions = [
             {
@@ -231,12 +270,16 @@ class TrainTouchClassifierTests(unittest.TestCase):
                 "label_touch_time_sec": 1.0,
                 "predicted_is_touch": True,
                 "touch_score": 0.80,
+                "audio_strength": 12.0,
+                "trajectory_local_y_quad_rms_px": 12.0,
             },
             {
                 **self.row("heldout", 1.10, False, split="test_frozen"),
                 "label_touch_time_sec": None,
                 "predicted_is_touch": True,
                 "touch_score": 0.95,
+                "audio_strength": 12.0,
+                "trajectory_local_y_quad_rms_px": 12.0,
             },
             {
                 **self.row("heldout", 3.0, False, split="test_frozen"),
@@ -287,6 +330,9 @@ class TrainTouchClassifierTests(unittest.TestCase):
                     "label_touch_time_sec": None,
                     "predicted_is_touch": True,
                     "touch_score": 0.80,
+                    "audio_strength": 12.0,
+                    "trajectory_break_support": 3,
+                    "trajectory_local_y_quad_rms_px": 12.0,
                 },
             ]
 
@@ -297,6 +343,151 @@ class TrainTouchClassifierTests(unittest.TestCase):
             self.assertEqual(event_metrics["false_positive"], 0)
             self.assertEqual(event_metrics["false_negative"], 0)
             self.assertEqual(event_rows[0]["event_match_type"], "true_positive")
+
+    def test_event_precision_gate_removes_very_weak_audio_artifact(self) -> None:
+        predictions = [
+            {
+                **self.row("heldout", 1.0, True, split="test_frozen"),
+                "label_touch_time_sec": 1.0,
+                "predicted_is_touch": True,
+                "touch_score": 0.80,
+                "audio_strength": 12.0,
+                "trajectory_local_y_quad_rms_px": 12.0,
+            },
+            {
+                **self.row("heldout", 3.0, False, split="test_frozen"),
+                "label_touch_time_sec": None,
+                "predicted_is_touch": True,
+                "touch_score": 0.90,
+                "audio_strength": 3.5,
+                "trajectory_break_support": 5,
+                "trajectory_nearest_break_delta_sec": 0.03,
+                "trajectory_local_y_quad_rms_px": 12.0,
+            },
+        ]
+
+        event_metrics = trainer.event_level_metrics_from_predictions(predictions)
+        event_rows = trainer.event_rows_from_predictions(predictions)
+        vetoes = trainer.event_precision_vetoes_from_predictions(predictions)
+
+        self.assertEqual(event_metrics["false_positive"], 0)
+        self.assertEqual(event_metrics["false_negative"], 0)
+        self.assertEqual(len(event_rows), 1)
+        self.assertEqual(vetoes[0]["event_precision_gate_reason"], "very_weak_audio_artifact")
+
+    def test_event_precision_gate_removes_flat_control_artifact(self) -> None:
+        predictions = [
+            {
+                **self.row("heldout", 1.0, True, split="test_frozen"),
+                "label_touch_time_sec": 1.0,
+                "predicted_is_touch": True,
+                "touch_score": 0.80,
+                "audio_strength": 12.0,
+                "trajectory_local_y_quad_rms_px": 12.0,
+            },
+            {
+                **self.row("heldout", 4.0, False, split="test_frozen"),
+                "label_touch_time_sec": None,
+                "predicted_is_touch": True,
+                "touch_score": 0.70,
+                "audio_strength": 12.0,
+                "trajectory_break_support": 3,
+                "trajectory_local_y_quad_rms_px": 1.5,
+            },
+        ]
+
+        vetoes = trainer.event_precision_vetoes_from_predictions(predictions)
+        event_metrics = trainer.event_level_metrics_from_predictions(predictions)
+
+        self.assertEqual(vetoes[0]["event_precision_gate_reason"], "flat_control_or_duplicate_artifact")
+        self.assertEqual(event_metrics["false_positive"], 0)
+
+    def test_event_precision_gate_removes_non_ballistic_high_residual_artifact(self) -> None:
+        predictions = [
+            {
+                **self.row("heldout", 1.0, True, split="test_frozen"),
+                "label_touch_time_sec": 1.0,
+                "predicted_is_touch": True,
+                "touch_score": 0.80,
+                "audio_strength": 12.0,
+                "trajectory_local_y_quad_rms_px": 12.0,
+            },
+            {
+                **self.row("heldout", 5.0, False, split="test_frozen"),
+                "label_touch_time_sec": None,
+                "predicted_is_touch": True,
+                "touch_score": 0.80,
+                "audio_strength": 12.0,
+                "trajectory_break_support": 6,
+                "trajectory_local_y_quad_rms_px": 150.0,
+            },
+        ]
+
+        vetoes = trainer.event_precision_vetoes_from_predictions(predictions)
+        event_metrics = trainer.event_level_metrics_from_predictions(predictions)
+
+        self.assertEqual(vetoes[0]["event_precision_gate_reason"], "non_ballistic_high_residual_artifact")
+        self.assertEqual(event_metrics["false_positive"], 0)
+
+    def test_event_precision_gate_removes_low_impulse_close_peak_trough_artifact(self) -> None:
+        predictions = [
+            {
+                **self.row("heldout", 1.0, True, split="test_frozen"),
+                "label_touch_time_sec": 1.0,
+                "predicted_is_touch": True,
+                "touch_score": 0.80,
+                "audio_strength": 12.0,
+                "trajectory_local_y_quad_rms_px": 12.0,
+            },
+            {
+                **self.row("heldout", 5.0, False, split="test_frozen"),
+                "label_touch_time_sec": None,
+                "predicted_is_touch": True,
+                "touch_score": 0.97,
+                "audio_strength": 9.5,
+                "trajectory_break_support": 3,
+                "trajectory_impulse_score": 450.0,
+                "trajectory_nearest_y_peak_delta_sec": 0.025,
+                "trajectory_nearest_y_trough_delta_sec": 0.008,
+                "trajectory_local_y_quad_rms_px": 4.0,
+            },
+        ]
+
+        vetoes = trainer.event_precision_vetoes_from_predictions(predictions)
+        event_metrics = trainer.event_level_metrics_from_predictions(predictions)
+
+        self.assertEqual(vetoes[0]["event_precision_gate_reason"], "low_impulse_close_peak_trough_artifact")
+        self.assertEqual(event_metrics["false_positive"], 0)
+
+    def test_event_precision_gate_removes_top_of_arc_no_impulse_artifact(self) -> None:
+        predictions = [
+            {
+                **self.row("heldout", 1.0, True, split="test_frozen"),
+                "label_touch_time_sec": 1.0,
+                "predicted_is_touch": True,
+                "touch_score": 0.80,
+                "audio_strength": 12.0,
+                "trajectory_local_y_quad_rms_px": 12.0,
+            },
+            {
+                **self.row("heldout", 5.0, False, split="test_frozen"),
+                "label_touch_time_sec": None,
+                "predicted_is_touch": True,
+                "touch_score": 0.99,
+                "audio_strength": 16.8,
+                "trajectory_break_support": 6,
+                "trajectory_impulse_score": None,
+                "trajectory_y_position_pct_window": 0.98,
+                "trajectory_y_trough_prominence_window_px": 2.5,
+                "trajectory_local_y_quad_rms_px": 6.0,
+            },
+        ]
+
+        vetoes = trainer.event_precision_vetoes_from_predictions(predictions)
+        event_metrics = trainer.event_level_metrics_from_predictions(predictions)
+
+        self.assertEqual(vetoes[0]["event_precision_gate_reason"], "top_of_arc_no_impulse_artifact")
+        self.assertEqual(event_metrics["false_positive"], 0)
 
     def test_training_summary_reports_raw_and_precision_gated_frozen_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
