@@ -90,6 +90,18 @@ python3 run_touch_pipeline.py \
   --attach-audio-features
 ```
 
+Run the v0.1 touch/HUD release readiness workflow in one command:
+
+```bash
+python3 hackytrack.py touch-release \
+  --out-dir runs/release-27-public/touch_release_v0_1 \
+  --touch-overrides release_overrides/touch_visual_overrides_v1.json
+```
+
+That command refreshes the touch pipeline, renders model-only and
+visual-corrected HUDs, runs frozen-test analytics, checks contact/type readiness,
+and writes `touch_release_readiness.md`.
+
 Render release HUD videos from the merged classifier events:
 
 ```bash

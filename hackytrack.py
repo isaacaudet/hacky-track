@@ -25,10 +25,18 @@ import cv2
 ROOT = Path(__file__).resolve().parent
 DEFAULT_RUNS = ROOT / "runs"
 STRICT_AMBIGUOUS_CONTACT_TYPES = {"unknown_contact", "foot_candidate", "knee_candidate", "ground_candidate"}
+DEFAULT_TOUCH_CORPUS = ROOT / "runs/release-27-public/touch_corpus_v1"
+DEFAULT_TOUCH_OVERRIDES = ROOT / "release_overrides/touch_visual_overrides_v1.json"
 
 
 def read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
@@ -74,6 +82,37 @@ def display_command(command: list[str]) -> str:
 
 def run_id() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+def ordered_jsonl_video_ids(path: Path) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for row in read_jsonl(path):
+        video_id = str(row.get("video_id") or "")
+        if video_id and video_id not in seen:
+            seen.add(video_id)
+            out.append(video_id)
+    return out
+
+
+def fmt_release_metric(value: Any) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, float):
+        return f"{value:.3f}"
+    return str(value)
+
+
+def release_gate_passed(summary: dict[str, Any]) -> bool:
+    touch = summary.get("touch_classifier") or {}
+    hud = summary.get("hud_model_only") or {}
+    corrected = summary.get("hud_visual_corrected") or {}
+    return bool(
+        touch.get("cv_gate_passed")
+        and touch.get("frozen_gate_passed")
+        and hud.get("status") == "passed"
+        and (not corrected or corrected.get("status") == "passed")
+    )
 
 
 def ensure_tool(name: str) -> None:
@@ -1670,6 +1709,334 @@ def report(args: argparse.Namespace) -> None:
     run_step("release candidate report", cmd, cwd=ROOT, dry_run=args.dry_run)
 
 
+def release_touch_paths(corpus_dir: Path) -> dict[str, Path]:
+    classifier_dir = corpus_dir / "touch_classifier_v1"
+    return {
+        "classifier_dir": classifier_dir,
+        "metrics": classifier_dir / "touch_classifier_metrics.json",
+        "frozen_events": classifier_dir / "touch_classifier_frozen_events.jsonl",
+        "oof_events": classifier_dir / "touch_classifier_oof_events.jsonl",
+        "detections": corpus_dir / "owlv2_touch_detections_v1/detections.jsonl",
+        "inventory": corpus_dir / "touch_corpus_inventory.json",
+        "visual_labels": corpus_dir / "visual_touch_labels",
+        "dataset": corpus_dir / "touch_training_dataset_v1",
+    }
+
+
+def release_summary_from_artifacts(
+    *,
+    run_dir: Path,
+    corpus_dir: Path,
+    command_log: list[dict[str, str]],
+    model_hud_dir: Path,
+    corrected_hud_dir: Path | None,
+    contact_dir: Path,
+    touch_overrides: Path | None,
+) -> dict[str, Any]:
+    paths = release_touch_paths(corpus_dir)
+    metrics = read_json(paths["metrics"]) if paths["metrics"].exists() else {}
+    cv_event = metrics.get("event_level_leave_one_video_out") or {}
+    frozen_event = metrics.get("event_level_frozen_test") or {}
+    model_manifest = read_json(model_hud_dir / "release_touch_hud_manifest.json") if (model_hud_dir / "release_touch_hud_manifest.json").exists() else {}
+    model_analytics = read_json(model_hud_dir / "analytics_frozen_only/release_rally_analytics.json") if (model_hud_dir / "analytics_frozen_only/release_rally_analytics.json").exists() else {}
+    corrected_manifest = (
+        read_json(corrected_hud_dir / "release_touch_hud_manifest.json")
+        if corrected_hud_dir is not None and (corrected_hud_dir / "release_touch_hud_manifest.json").exists()
+        else {}
+    )
+    corrected_analytics = (
+        read_json(corrected_hud_dir / "analytics_frozen_only/release_rally_analytics.json")
+        if corrected_hud_dir is not None and (corrected_hud_dir / "analytics_frozen_only/release_rally_analytics.json").exists()
+        else {}
+    )
+    contact_summary = read_json(contact_dir / "release_contact_classifier_summary.json") if (contact_dir / "release_contact_classifier_summary.json").exists() else {}
+    summary = {
+        "schema_version": 1,
+        "created_at": datetime.now().isoformat(),
+        "scope": "v0.1_touch_hud_release",
+        "run_dir": portable_path_ref(run_dir),
+        "corpus_dir": portable_path_ref(corpus_dir),
+        "commands": command_log,
+        "touch_classifier": {
+            "status": metrics.get("status"),
+            "feature_mode": metrics.get("feature_mode"),
+            "cv_gate_passed": bool((metrics.get("event_level_cv_gate") or {}).get("passes")),
+            "frozen_gate_passed": bool((metrics.get("event_level_frozen_test_gate") or {}).get("passes")),
+            "cv_event": {
+                "precision": cv_event.get("precision"),
+                "recall": cv_event.get("recall"),
+                "f1": cv_event.get("f1"),
+                "false_positive": cv_event.get("false_positive"),
+                "false_negative": cv_event.get("false_negative"),
+            },
+            "frozen_event": {
+                "precision": frozen_event.get("precision"),
+                "recall": frozen_event.get("recall"),
+                "f1": frozen_event.get("f1"),
+                "false_positive": frozen_event.get("false_positive"),
+                "false_negative": frozen_event.get("false_negative"),
+            },
+        },
+        "hud_model_only": {
+            "status": model_manifest.get("status"),
+            "videos": len(model_manifest.get("videos") or []),
+            "preview_sheet": portable_path_ref(Path(model_manifest["preview_sheet"])) if model_manifest.get("preview_sheet") else None,
+            "analytics": (model_analytics.get("aggregate") or {}).get("touch_metrics", {}),
+            "report": portable_path_ref(model_hud_dir / "release_touch_hud_report.md"),
+            "analytics_report": portable_path_ref(model_hud_dir / "analytics_frozen_only/release_rally_analytics.md"),
+        },
+        "hud_visual_corrected": (
+            {
+                "status": corrected_manifest.get("status"),
+                "videos": len(corrected_manifest.get("videos") or []),
+                "touch_overrides": portable_path_ref(touch_overrides) if touch_overrides else None,
+                "preview_sheet": portable_path_ref(Path(corrected_manifest["preview_sheet"])) if corrected_manifest.get("preview_sheet") else None,
+                "analytics": (corrected_analytics.get("aggregate") or {}).get("touch_metrics", {}),
+                "report": portable_path_ref(corrected_hud_dir / "release_touch_hud_report.md") if corrected_hud_dir else None,
+                "analytics_report": portable_path_ref(corrected_hud_dir / "analytics_frozen_only/release_rally_analytics.md") if corrected_hud_dir else None,
+            }
+            if corrected_hud_dir is not None
+            else {}
+        ),
+        "contact_classifier": {
+            "status": contact_summary.get("status"),
+            "reasons": contact_summary.get("reasons") or [],
+            "rows_with_pose_features": contact_summary.get("rows_with_pose_features"),
+            "rows_with_contact_labels": contact_summary.get("rows_with_contact_labels"),
+            "report": portable_path_ref(contact_dir / "release_contact_classifier_report.md"),
+        },
+        "limitations": [
+            "v0.1 releases generic touch timing and HUD output only.",
+            "Side/contact-type/knee classification is not promoted until pose features and reviewed contact labels pass their own gate.",
+            "Stall/drop badges are rendered from reviewed labels when available; the OWLv2 touch release path does not infer them yet.",
+            "Visual overrides are output corrections, not classifier training labels or gate evidence.",
+        ],
+    }
+    summary["status"] = "release_ready_v0_1" if release_gate_passed(summary) else "blocked"
+    return summary
+
+
+def write_touch_release_report(path: Path, summary: dict[str, Any]) -> None:
+    touch = summary["touch_classifier"]
+    model = summary["hud_model_only"]
+    corrected = summary.get("hud_visual_corrected") or {}
+    contact = summary["contact_classifier"]
+
+    def metrics_row(label: str, metrics: dict[str, Any]) -> str:
+        return (
+            f"| {label} | {fmt_release_metric(metrics.get('precision'))} | "
+            f"{fmt_release_metric(metrics.get('recall'))} | {fmt_release_metric(metrics.get('f1'))} | "
+            f"{fmt_release_metric(metrics.get('false_positive'))} | {fmt_release_metric(metrics.get('false_negative'))} |"
+        )
+
+    lines = [
+        "# Touch HUD Release Readiness",
+        "",
+        f"- Status: `{summary['status']}`",
+        f"- Scope: `{summary['scope']}`",
+        f"- Created: `{summary['created_at']}`",
+        f"- Run dir: `{summary['run_dir']}`",
+        "",
+        "## Commands",
+        "",
+    ]
+    for command in summary.get("commands") or []:
+        lines.append(f"- `{command['name']}`: `{command['command']}`")
+    lines.extend(
+        [
+            "",
+            "## Touch Gates",
+            "",
+            f"- Classifier status: `{touch.get('status')}`",
+            f"- Feature mode: `{touch.get('feature_mode')}`",
+            f"- Leave-clips-out CV gate: `{touch.get('cv_gate_passed')}`",
+            f"- Frozen-test gate: `{touch.get('frozen_gate_passed')}`",
+            "",
+            "| split | precision | recall | F1 | FP | FN |",
+            "| --- | ---: | ---: | ---: | ---: | ---: |",
+            metrics_row("leave-clips-out CV", touch.get("cv_event") or {}),
+            metrics_row("frozen test", touch.get("frozen_event") or {}),
+            "",
+            "## HUD Output",
+            "",
+            f"- Model-only HUD status: `{model.get('status')}`",
+            f"- Model-only videos: `{model.get('videos')}`",
+            f"- Model-only preview: `{model.get('preview_sheet')}`",
+            f"- Model-only report: `{model.get('report')}`",
+            f"- Model-only analytics: `{model.get('analytics_report')}`",
+            "",
+            "| HUD set | precision | recall | F1 | FP | FN |",
+            "| --- | ---: | ---: | ---: | ---: | ---: |",
+            metrics_row("model-only frozen HUD", model.get("analytics") or {}),
+        ]
+    )
+    if corrected:
+        lines.extend(
+            [
+                metrics_row("visual-corrected frozen HUD", corrected.get("analytics") or {}),
+                "",
+                f"- Visual-corrected HUD status: `{corrected.get('status')}`",
+                f"- Visual-corrected videos: `{corrected.get('videos')}`",
+                f"- Visual override file: `{corrected.get('touch_overrides')}`",
+                f"- Visual-corrected preview: `{corrected.get('preview_sheet')}`",
+                f"- Visual-corrected report: `{corrected.get('report')}`",
+                f"- Visual-corrected analytics: `{corrected.get('analytics_report')}`",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "## Rally Intelligence Status",
+            "",
+            f"- Contact classifier status: `{contact.get('status')}`",
+            f"- Rows with pose features: `{contact.get('rows_with_pose_features')}`",
+            f"- Rows with reviewed contact labels: `{contact.get('rows_with_contact_labels')}`",
+            f"- Contact report: `{contact.get('report')}`",
+            "",
+            "Contact/type blockers:",
+            "",
+        ]
+    )
+    for reason in contact.get("reasons") or ["none"]:
+        lines.append(f"- {reason}")
+    lines.extend(["", "## Limitations", ""])
+    for limitation in summary.get("limitations") or []:
+        lines.append(f"- {limitation}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def append_video_id_args(cmd: list[str], video_ids: list[str]) -> None:
+    for video_id in video_ids:
+        cmd.extend(["--video-id", video_id])
+
+
+def touch_release(args: argparse.Namespace) -> None:
+    corpus_dir = args.corpus_dir.resolve()
+    paths = release_touch_paths(corpus_dir)
+    detections = (args.detections_jsonl or paths["detections"]).resolve()
+    out_dir = (args.out_dir or (DEFAULT_RUNS / f"touch-release-{run_id()}")).resolve()
+    if out_dir.exists() and any(out_dir.iterdir()) and not args.overwrite:
+        raise RuntimeError(f"Output directory already exists and is not empty: {out_dir}. Pass --overwrite to reuse it.")
+    if not args.dry_run:
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+    python = sys.executable
+    command_log: list[dict[str, str]] = []
+
+    def run_release_step(name: str, cmd: list[str]) -> None:
+        command_log.append({"name": name, "command": display_command(cmd)})
+        run_step(name, cmd, cwd=ROOT, dry_run=args.dry_run)
+
+    if not args.skip_pipeline:
+        pipeline_cmd = [
+            python,
+            "run_touch_pipeline.py",
+            "--corpus-dir",
+            str(corpus_dir),
+            "--detections-jsonl",
+            str(detections),
+            "--attach-audio-features",
+        ]
+        if args.import_existing_labels:
+            pipeline_cmd.append("--import-existing-labels")
+        run_release_step("touch pipeline", pipeline_cmd)
+
+    frozen_video_ids = ordered_jsonl_video_ids(paths["frozen_events"])
+    selected_video_ids = args.video_id or []
+    analytics_video_ids = selected_video_ids or frozen_video_ids
+
+    model_hud_dir = out_dir / "hud_model_only"
+    base_render_cmd = [
+        python,
+        "render_touch_release_hud.py",
+        "--frozen-events",
+        str(paths["frozen_events"]),
+        "--oof-events",
+        str(paths["oof_events"]),
+        "--detections-jsonl",
+        str(detections),
+        "--inventory",
+        str(paths["inventory"]),
+        "--visual-labels-dir",
+        str(paths["visual_labels"]),
+        "--out-dir",
+        str(model_hud_dir),
+        "--extra-non-frozen",
+        str(args.extra_non_frozen),
+    ]
+    append_video_id_args(base_render_cmd, selected_video_ids)
+    if args.max_seconds is not None:
+        base_render_cmd.extend(["--max-seconds", str(args.max_seconds)])
+    if args.allow_missing_audio:
+        base_render_cmd.append("--allow-missing-audio")
+    if args.allow_missing_centers:
+        base_render_cmd.append("--allow-missing-centers")
+    run_release_step("model-only release HUD", base_render_cmd)
+
+    model_analytics_cmd = [
+        python,
+        "release_rally_analytics.py",
+        "--hud-dir",
+        str(model_hud_dir),
+        "--out-dir",
+        str(model_hud_dir / "analytics_frozen_only"),
+    ]
+    append_video_id_args(model_analytics_cmd, analytics_video_ids)
+    run_release_step("model-only frozen analytics", model_analytics_cmd)
+
+    corrected_hud_dir: Path | None = None
+    touch_overrides = args.touch_overrides
+    if touch_overrides is not None and touch_overrides.exists():
+        corrected_hud_dir = out_dir / "hud_visual_corrected"
+        corrected_render_cmd = [*base_render_cmd]
+        corrected_render_cmd[corrected_render_cmd.index(str(model_hud_dir))] = str(corrected_hud_dir)
+        corrected_render_cmd.extend(["--touch-overrides", str(touch_overrides)])
+        run_release_step("visual-corrected release HUD", corrected_render_cmd)
+        corrected_analytics_cmd = [
+            python,
+            "release_rally_analytics.py",
+            "--hud-dir",
+            str(corrected_hud_dir),
+            "--out-dir",
+            str(corrected_hud_dir / "analytics_frozen_only"),
+        ]
+        append_video_id_args(corrected_analytics_cmd, analytics_video_ids)
+        run_release_step("visual-corrected frozen analytics", corrected_analytics_cmd)
+    elif touch_overrides is not None:
+        print(f"warning: touch override file not found, skipping visual-corrected HUD: {touch_overrides}", file=sys.stderr)
+
+    contact_dir = out_dir / "contact_classifier"
+    contact_cmd = [
+        python,
+        "train_release_contact_classifier.py",
+        "--dataset-dir",
+        str(paths["dataset"]),
+        "--labels-dir",
+        str(paths["visual_labels"]),
+        "--out-dir",
+        str(contact_dir),
+    ]
+    run_release_step("contact classifier readiness", contact_cmd)
+
+    if args.dry_run:
+        return
+
+    summary = release_summary_from_artifacts(
+        run_dir=out_dir,
+        corpus_dir=corpus_dir,
+        command_log=command_log,
+        model_hud_dir=model_hud_dir,
+        corrected_hud_dir=corrected_hud_dir,
+        contact_dir=contact_dir,
+        touch_overrides=touch_overrides if touch_overrides and touch_overrides.exists() else None,
+    )
+    write_json(out_dir / "touch_release_readiness.json", summary)
+    write_touch_release_report(out_dir / "touch_release_readiness.md", summary)
+    print(f"status: {summary['status']}")
+    print(f"report: {out_dir / 'touch_release_readiness.md'}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Hacky Track release CLI")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -2045,6 +2412,22 @@ def build_parser() -> argparse.ArgumentParser:
     report_parser.add_argument("--test-evidence", default="")
     report_parser.add_argument("--dry-run", action="store_true")
     report_parser.set_defaults(func=report)
+
+    touch_release_parser = sub.add_parser("touch-release", help="Run the v0.1 touch/HUD release readiness workflow")
+    touch_release_parser.add_argument("--corpus-dir", type=Path, default=DEFAULT_TOUCH_CORPUS)
+    touch_release_parser.add_argument("--detections-jsonl", type=Path)
+    touch_release_parser.add_argument("--out-dir", type=Path)
+    touch_release_parser.add_argument("--touch-overrides", type=Path, default=DEFAULT_TOUCH_OVERRIDES)
+    touch_release_parser.add_argument("--video-id", action="append", default=[])
+    touch_release_parser.add_argument("--extra-non-frozen", type=int, default=1)
+    touch_release_parser.add_argument("--max-seconds", type=float)
+    touch_release_parser.add_argument("--skip-pipeline", action="store_true", help="Reuse current classifier artifacts and only render/report")
+    touch_release_parser.add_argument("--import-existing-labels", action="store_true")
+    touch_release_parser.add_argument("--allow-missing-audio", action="store_true")
+    touch_release_parser.add_argument("--allow-missing-centers", action="store_true")
+    touch_release_parser.add_argument("--overwrite", action="store_true")
+    touch_release_parser.add_argument("--dry-run", action="store_true")
+    touch_release_parser.set_defaults(func=touch_release)
 
     return parser
 
