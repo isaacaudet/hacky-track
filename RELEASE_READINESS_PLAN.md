@@ -38,13 +38,14 @@ It requires:
 
 ## Current Status
 
-v0.1 touch timing is release-shaped:
+v0.1 touch timing is release-ready:
 
 - Leave-clips-out CV merged event gate passes.
 - Frozen-test merged event gate passes.
 - Visual-corrected frozen HUD set passes video/audio/nonblank checks.
 - Frozen-test visual-corrected HUD analytics: precision `1.000`, recall `0.993`, F1 `0.996`, false positives `0`, missed touches `1`.
-- Full test suite passes: `221/221`.
+- One-command release workflow writes `runs/release-27-public/touch_release_v0_1/touch_release_readiness.md` with status `release_ready_v0_1`.
+- Full test suite passes: `224/224`.
 
 Current non-goal status:
 
@@ -53,11 +54,11 @@ Current non-goal status:
 - Reviewed left/right/contact labels are missing.
 - Stall/drop badges are label-backed display events only.
 
-## Remaining v0.1 Blockers
+## v0.1 Blockers And Evidence
 
 ### 1. Public One-Command Release Path
 
-The release path currently works through separate scripts:
+The release path used to work through separate scripts:
 
 - `run_touch_pipeline.py`
 - `render_touch_release_hud.py`
@@ -67,14 +68,23 @@ The release path currently works through separate scripts:
 
 Release-ready means a user can run one documented command that produces one versioned output directory with status, HUD videos, analytics, and limitations.
 
+Current command:
+
+```bash
+python3 hackytrack.py touch-release \
+  --out-dir runs/release-27-public/touch_release_v0_1 \
+  --touch-overrides release_overrides/touch_visual_overrides_v1.json \
+  --overwrite
+```
+
 Acceptance:
 
-- One command writes a versioned release directory.
-- It runs the touch pipeline from cached detections or exports detections when requested.
-- It renders HUD overlays.
-- It writes model-only and visual-corrected analytics when overrides are provided.
-- It runs contact-classifier readiness and records blockers.
-- It writes a final release readiness report.
+- One command writes a versioned release directory. DONE.
+- It runs the touch pipeline from cached detections or exports detections when requested. DONE.
+- It renders HUD overlays. DONE.
+- It writes model-only and visual-corrected analytics when overrides are provided. DONE.
+- It runs contact-classifier readiness and records blockers. DONE.
+- It writes a final release readiness report. DONE.
 
 ### 2. Portable Output Paths
 
@@ -82,9 +92,9 @@ Release-facing reports should avoid hardcoded `/Users/...` paths where possible.
 
 Acceptance:
 
-- Final release report uses repo-relative artifact paths.
-- README commands are copy-pasteable from repo root.
-- No release-facing text artifact depends on one local machine layout.
+- Final release report uses repo-relative artifact paths. DONE.
+- README commands are copy-pasteable from repo root. DONE.
+- No release-facing Markdown artifact depends on one local machine layout. DONE.
 
 ### 3. Final Release Readiness Report
 
@@ -92,12 +102,12 @@ The release needs a single report that says what passed, what did not, and what 
 
 Acceptance:
 
-- Includes touch CV and frozen-test metrics.
-- Includes HUD render verification.
-- Includes visual-corrected frozen metrics when overrides exist.
-- Includes contact/stall/drop/trick readiness status.
-- Includes exact commands used.
-- Includes final limitations and next release work.
+- Includes touch CV and frozen-test metrics. DONE.
+- Includes HUD render verification. DONE.
+- Includes visual-corrected frozen metrics when overrides exist. DONE.
+- Includes contact/stall/drop/trick readiness status. DONE.
+- Includes exact commands used. DONE.
+- Includes final limitations and next release work. DONE.
 
 ### 4. Fresh Smoke Run
 
@@ -105,10 +115,10 @@ Before tagging release, run the one-command path on at least one representative 
 
 Acceptance:
 
-- HUD MP4 has video, audio, and nonblank sampled frames.
-- Preview sheet renders.
-- Analytics report matches expected metrics.
-- Tests pass after the smoke run.
+- HUD MP4 has video, audio, and nonblank sampled frames. DONE.
+- Preview sheet renders. DONE.
+- Analytics report matches expected metrics. DONE.
+- Tests pass after the smoke run. DONE.
 
 ## v1.0 Blockers
 

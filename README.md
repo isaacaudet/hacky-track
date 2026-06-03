@@ -147,6 +147,12 @@ The release-candidate report is:
 TOUCH_RELEASE_CANDIDATE_REPORT.md
 ```
 
+The v0.1 release-readiness report is:
+
+```text
+RELEASE_V0_1_READINESS_REPORT.md
+```
+
 Current gate status: merged event-level touch precision/recall passes both
 leave-clips-out CV and frozen-test gates; release HUD verification passes video,
 audio, and nonblank-frame checks.
