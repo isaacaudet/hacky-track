@@ -323,6 +323,91 @@ class ReleaseContactClassifierTests(unittest.TestCase):
             self.assertEqual(len(examples), 1)
             self.assertEqual(examples[0]["contact_type"], "stall")
 
+    def test_contact_label_file_inventory_separates_generic_and_surface_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_json(
+                root / "video-a.events.json",
+                {
+                    "source_video": "video-a.MOV",
+                    "rallies": [
+                        {
+                            "events": [
+                                {
+                                    "type": "touch",
+                                    "time_sec": 1.0,
+                                    "review_status": "approved",
+                                    "trick_label": "right_kick",
+                                    "contact_surface": "unknown",
+                                },
+                                {
+                                    "type": "touch",
+                                    "time_sec": 2.0,
+                                    "review_status": "approved",
+                                    "trick_label": "left_inner_kick",
+                                },
+                                {
+                                    "type": "touch",
+                                    "time_sec": 3.0,
+                                    "review_status": "rejected",
+                                    "trick_label": "right_outer_kick",
+                                },
+                            ],
+                        }
+                    ],
+                },
+            )
+
+            inventory = contact.contact_label_file_inventory(root)
+
+            aggregate = inventory["aggregate"]
+            self.assertEqual(aggregate["contact_type_labels"], 2)
+            self.assertEqual(aggregate["contact_side_labels"], 2)
+            self.assertEqual(aggregate["contact_surface_labels"], 1)
+            self.assertEqual(aggregate["explicit_unknown_surface_labels"], 1)
+            self.assertEqual(aggregate["surface_counts"], {"inner": 1})
+
+    def test_contact_label_gap_summary_reports_release_class_shortfalls(self) -> None:
+        rows = [
+            {"video_id": "a", "contact_type": "kick", "contact_side": "left", "contact_surface": "inner"},
+            {"video_id": "b", "contact_type": "stall", "contact_side": "right", "contact_surface": "outer"},
+            {"video_id": "c", "contact_type": "kick", "contact_side": "right"},
+        ]
+
+        gaps = contact.contact_label_gap_summary(rows)
+
+        self.assertEqual(gaps["contact_side"]["additional_needed"], {"left": 19, "right": 18})
+        self.assertEqual(gaps["contact_surface"]["additional_needed"], {"inner": 19, "outer": 19})
+        self.assertEqual(gaps["contact_type"]["additional_needed"]["knee"], 20)
+        self.assertEqual(gaps["contact_type"]["additional_needed"]["drop_floor"], 20)
+
+    def test_pose_coverage_by_contact_target_counts_pose_status_by_label(self) -> None:
+        rows = [
+            {
+                "video_id": "a",
+                "contact_side": "left",
+                "contact_type": "kick",
+                "pose_present": True,
+                "pose_feature_status": "ok",
+                "pose_nearest_foot_dist_px": 8.0,
+            },
+            {
+                "video_id": "b",
+                "contact_side": "right",
+                "contact_type": "kick",
+                "pose_present": False,
+                "pose_feature_status": "missing_person_box",
+                "pose_nearest_foot_dist_px": None,
+            },
+        ]
+
+        coverage = contact.pose_coverage_by_contact_target(rows)
+
+        self.assertEqual(coverage["contact_side"]["rows"], 2)
+        self.assertEqual(coverage["contact_side"]["pose_present_rows"], 1)
+        self.assertEqual(coverage["contact_side"]["usable_pose_distance_rows"], 1)
+        self.assertEqual(coverage["contact_side"]["by_label"]["right"]["pose_status_counts"], {"missing_person_box": 1})
+
     def test_trains_clip_disjoint_contact_side_model_when_labels_exist(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out_dir = Path(tmp)

@@ -152,11 +152,16 @@ Current v1.0 contact-intelligence status is intentionally split:
 | touch timing | release-candidate, merged event-level gates pass with the complete OWLv2 detection cache set |
 | HUD touch sparks | release-candidate, OWLv2/L2 anchors, no HSV fallback |
 | reviewed contact badges | manual/label-backed HUD display only |
-| contact type | candidate, raw kick/stall accuracy reaches 0.951, balanced accuracy 0.779; release-scope fails without enough stall/knee/drop labels |
-| left/right side | candidate, below release gate at 0.750 raw / 0.702 balanced accuracy |
+| contact type | candidate, raw kick/stall accuracy reaches 0.963, balanced accuracy 0.786; release-scope fails without enough stall/knee/drop labels |
+| left/right side | candidate, below release gate at 0.750 raw / 0.691 balanced accuracy |
 | inner/outer surface | candidate, below release gate at 0.760 raw / 0.615 balanced accuracy |
 | automatic drop/floor reset | evaluated candidate, fails gate at 0.682 precision / 0.714 recall after rally-sequence reset features |
 | automatic stall | not ready; only 3 approved stall examples in the existing reviewed reset/stall corpus |
+
+`train_release_contact_classifier.py` now reports exact release label gaps from
+the event files: side class-count coverage is met, but side accuracy still
+fails; surface needs +13 inner and +2 outer reviewed labels; contact type needs
++13 stall, +20 knee, and +20 drop_floor examples before full v1.0 scope.
 
 The separate model-only touch-stream exporter can fill unreviewed touch context
 for reset/stall experiments:
@@ -796,7 +801,9 @@ What is still in progress:
   but `video-344_singular_display-2` remains the weakest leave-clips-out clip
 - reliable side/contact-type/knee classification; pose/body-proximity and
   visual-crop features are attachable now, and the release contact classifier
-  trains, but side and inner/outer surface accuracy are still below gate
+  trains, but side and inner/outer surface accuracy are still below gate; fresh
+  pose-cache completion helped contact type slightly and did not solve side or
+  surface
 - automatic stall/drop detection; release HUD can render reviewed stall/drop
   labels, and the separate reset/stall audit now has full OWLv2/L2 coverage,
   but automatic drop still fails gate even after score-threshold diagnostics,

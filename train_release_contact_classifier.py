@@ -383,6 +383,87 @@ def load_label_contact_examples(labels_dir: Path) -> list[dict[str, Any]]:
     return examples
 
 
+def contact_label_file_inventory(labels_dir: Path) -> dict[str, Any]:
+    """Summarize reviewed contact labels in event files before row matching.
+
+    This inventory intentionally distinguishes generic side/type labels from
+    inner/outer surface labels. A reviewed `right_kick` is useful for side/type
+    training, but it is not a surface example unless it says inner/outer.
+    """
+
+    files: list[dict[str, Any]] = []
+    aggregate_counts: Counter[str] = Counter()
+    aggregate_type_counts: Counter[str] = Counter()
+    aggregate_side_counts: Counter[str] = Counter()
+    aggregate_surface_counts: Counter[str] = Counter()
+    for path in sorted(labels_dir.glob("*.events.json")):
+        doc = read_json(path)
+        file_counts: Counter[str] = Counter()
+        type_counts: Counter[str] = Counter()
+        side_counts: Counter[str] = Counter()
+        surface_counts: Counter[str] = Counter()
+        trick_counts: Counter[str] = Counter()
+        for rally in doc.get("rallies", []):
+            for event in rally.get("events", []):
+                if event.get("review_status") not in {None, "", "approved", "reviewed"}:
+                    continue
+                file_counts["reviewed_events"] += 1
+                trick_label = str(event.get("trick_label") or "")
+                contact_type = normalize_type(first_value(event, CONTACT_TYPE_KEYS) or trick_label, str(event.get("type") or ""))
+                contact_side = normalize_side(first_value(event, CONTACT_SIDE_KEYS), trick_label)
+                contact_side_basis = normalize_side_basis(first_value(event, CONTACT_SIDE_BASIS_KEYS), contact_side=contact_side, trick_label=trick_label)
+                if contact_side and not side_label_is_trainable(contact_side_basis, contact_side=contact_side, trick_label=trick_label):
+                    file_counts["excluded_non_wearer_side_labels"] += 1
+                    contact_side = None
+                raw_surface = first_value(event, CONTACT_SURFACE_KEYS)
+                contact_surface = normalize_surface(raw_surface, trick_label)
+                if raw_surface and str(raw_surface).strip().lower() in {"unknown", "unclear", "ambiguous"}:
+                    file_counts["explicit_unknown_surface_labels"] += 1
+                if contact_type:
+                    file_counts["contact_type_labels"] += 1
+                    type_counts[contact_type] += 1
+                if contact_side:
+                    file_counts["contact_side_labels"] += 1
+                    side_counts[contact_side] += 1
+                if contact_surface:
+                    file_counts["contact_surface_labels"] += 1
+                    surface_counts[contact_surface] += 1
+                if trick_label:
+                    trick_counts[trick_label] += 1
+        row = {
+            "file": path.name,
+            "reviewed_events": int(file_counts["reviewed_events"]),
+            "contact_type_labels": int(file_counts["contact_type_labels"]),
+            "contact_side_labels": int(file_counts["contact_side_labels"]),
+            "contact_surface_labels": int(file_counts["contact_surface_labels"]),
+            "explicit_unknown_surface_labels": int(file_counts["explicit_unknown_surface_labels"]),
+            "excluded_non_wearer_side_labels": int(file_counts["excluded_non_wearer_side_labels"]),
+            "type_counts": dict(type_counts),
+            "side_counts": dict(side_counts),
+            "surface_counts": dict(surface_counts),
+            "trick_label_counts": dict(trick_counts),
+        }
+        files.append(row)
+        aggregate_counts.update({key: value for key, value in file_counts.items() if isinstance(value, int)})
+        aggregate_type_counts.update(type_counts)
+        aggregate_side_counts.update(side_counts)
+        aggregate_surface_counts.update(surface_counts)
+    return {
+        "files": files,
+        "aggregate": {
+            "reviewed_events": int(aggregate_counts["reviewed_events"]),
+            "contact_type_labels": int(aggregate_counts["contact_type_labels"]),
+            "contact_side_labels": int(aggregate_counts["contact_side_labels"]),
+            "contact_surface_labels": int(aggregate_counts["contact_surface_labels"]),
+            "explicit_unknown_surface_labels": int(aggregate_counts["explicit_unknown_surface_labels"]),
+            "excluded_non_wearer_side_labels": int(aggregate_counts["excluded_non_wearer_side_labels"]),
+            "type_counts": dict(aggregate_type_counts),
+            "side_counts": dict(aggregate_side_counts),
+            "surface_counts": dict(aggregate_surface_counts),
+        },
+    }
+
+
 def attach_event_file_contact_labels(
     rows: list[dict[str, Any]],
     label_examples: list[dict[str, Any]],
@@ -460,6 +541,51 @@ def rows_with_contact_labels(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
         if contact_type is None and contact_side is None and contact_surface is None:
             continue
         out.append({**row, "contact_type": contact_type, "contact_side": contact_side, "contact_side_basis": contact_side_basis, "contact_surface": contact_surface, **pose_candidate(row)})
+    return out
+
+
+def contact_label_gap_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    labeled_rows = rows_with_contact_labels(rows)
+    out: dict[str, Any] = {}
+    for target in CONTACT_TARGETS:
+        counts = Counter(str(row[target]) for row in labeled_rows if row.get(target))
+        coverage = release_class_coverage(counts, target)
+        if coverage is None:
+            continue
+        out[target] = {
+            "class_counts": coverage["class_counts"],
+            "min_examples_per_class": coverage["min_examples_per_class"],
+            "additional_needed": {
+                klass: max(0, int(coverage["min_examples_per_class"]) - int(count))
+                for klass, count in coverage["class_counts"].items()
+            },
+            "passes": coverage["passes"],
+            "blockers": coverage["blockers"],
+        }
+    return out
+
+
+def pose_coverage_by_contact_target(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    labeled_rows = rows_with_contact_labels(rows)
+    out: dict[str, Any] = {}
+    for target in CONTACT_TARGETS:
+        target_rows = [row for row in labeled_rows if row.get(target)]
+        by_label: dict[str, Any] = {}
+        for label in sorted({str(row[target]) for row in target_rows}):
+            label_rows = [row for row in target_rows if str(row[target]) == label]
+            by_label[label] = {
+                "rows": len(label_rows),
+                "pose_present_rows": sum(1 for row in label_rows if row.get("pose_present")),
+                "usable_pose_distance_rows": sum(1 for row in label_rows if pose_feature_present(row)),
+                "pose_status_counts": dict(Counter(str(row.get("pose_feature_status") or "missing") for row in label_rows)),
+            }
+        out[target] = {
+            "rows": len(target_rows),
+            "pose_present_rows": sum(1 for row in target_rows if row.get("pose_present")),
+            "usable_pose_distance_rows": sum(1 for row in target_rows if pose_feature_present(row)),
+            "pose_status_counts": dict(Counter(str(row.get("pose_feature_status") or "missing") for row in target_rows)),
+            "by_label": by_label,
+        }
     return out
 
 
@@ -1034,6 +1160,52 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
         lines.extend(["", "## Baselines", ""])
         for label, result in summary["majority_baselines"].items():
             lines.append(f"- `{label}` leave-one-video-out majority baseline: `{result}`")
+    if summary.get("contact_label_gaps"):
+        lines.extend(["", "## Release Label Gaps", ""])
+        lines.extend(
+            [
+                "| target | class counts | additional needed | status |",
+                "| --- | --- | --- | --- |",
+            ]
+        )
+        for target, gap in summary["contact_label_gaps"].items():
+            status = "pass" if gap.get("passes") else "blocked"
+            lines.append(
+                f"| `{target}` | `{gap.get('class_counts')}` | "
+                f"`{gap.get('additional_needed')}` | {status} |"
+            )
+    if summary.get("pose_coverage_by_contact_target"):
+        lines.extend(["", "## Pose Coverage For Reviewed Contact Rows", ""])
+        lines.extend(
+            [
+                "| target | rows | pose present | usable pose | pose status counts |",
+                "| --- | ---: | ---: | ---: | --- |",
+            ]
+        )
+        for target, coverage in summary["pose_coverage_by_contact_target"].items():
+            lines.append(
+                f"| `{target}` | {coverage.get('rows')} | {coverage.get('pose_present_rows')} | "
+                f"{coverage.get('usable_pose_distance_rows')} | `{coverage.get('pose_status_counts')}` |"
+            )
+    if summary.get("contact_label_file_inventory"):
+        inventory = summary["contact_label_file_inventory"]
+        lines.extend(["", "## Event-File Contact Label Inventory", ""])
+        lines.append(f"- Aggregate: `{inventory.get('aggregate')}`")
+        lines.extend(
+            [
+                "",
+                "| file | type | side | surface | unknown surface | trick labels |",
+                "| --- | ---: | ---: | ---: | ---: | --- |",
+            ]
+        )
+        for row in inventory.get("files", []):
+            if not (row.get("contact_type_labels") or row.get("contact_side_labels") or row.get("contact_surface_labels")):
+                continue
+            lines.append(
+                f"| `{row.get('file')}` | {row.get('contact_type_labels')} | {row.get('contact_side_labels')} | "
+                f"{row.get('contact_surface_labels')} | {row.get('explicit_unknown_surface_labels')} | "
+                f"`{row.get('trick_label_counts')}` |"
+            )
     if summary.get("trained_models"):
         lines.extend(["", "## Trained Models", ""])
         trained_models = summary["trained_models"]
@@ -1119,6 +1291,7 @@ def run_contact_classifier(args: argparse.Namespace) -> dict[str, Any]:
     rows = read_jsonl(args.dataset_dir / "touch_training_candidates.jsonl")
     rows += read_jsonl(args.dataset_dir / "touch_training_test_frozen.jsonl")
     label_examples = load_label_contact_examples(args.labels_dir)
+    label_inventory = contact_label_file_inventory(args.labels_dir)
     rows, label_match = attach_event_file_contact_labels(rows, label_examples, tolerance_sec=args.label_match_tolerance_sec)
     summary = readiness_summary(rows, label_examples, min_examples=args.min_examples, min_videos=args.min_videos)
     labeled_rows = rows_with_contact_labels(rows)
@@ -1143,6 +1316,9 @@ def run_contact_classifier(args: argparse.Namespace) -> dict[str, Any]:
             "dataset_dir": str(args.dataset_dir),
             "labels_dir": str(args.labels_dir),
             "event_file_label_match": label_match,
+            "contact_label_file_inventory": label_inventory,
+            "contact_label_gaps": contact_label_gap_summary(rows),
+            "pose_coverage_by_contact_target": pose_coverage_by_contact_target(rows),
             "majority_baselines": majority_baselines,
             "trained_models": trained_models,
             "report": str(args.out_dir / "release_contact_classifier_report.md"),

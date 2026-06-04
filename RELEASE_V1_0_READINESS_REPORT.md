@@ -50,21 +50,33 @@ Clip-disjoint leave-one-video-out results:
 
 | target | accuracy | balanced accuracy | gate | selected feature mode | interpretation |
 | --- | ---: | ---: | --- | --- | --- |
-| contact type | 0.951 | 0.779 | raw pass / release-scope fail | no_visual_crop + ridge classifier | Raw kick/stall accuracy passes, but stall recall is only 0.571 and class coverage blocks full v1.0: stall 7, knee 0, drop_floor 0. |
-| side | 0.750 | 0.702 | fail | no_vision_embedding + logistic regression | Raw accuracy holds at 0.750 while left recall improves to 0.560; still below the 0.85 side gate. |
-| surface | 0.760 | 0.615 | fail | all_features + logistic regression | Raw accuracy holds at 0.760 while inner recall improves to 0.286; still below gate and label-limited. |
+| contact type | 0.963 | 0.786 | raw pass / release-scope fail | no_visual_crop + ridge classifier | Fresh pose-cache completion removes one kick/stall error, but stall recall is still only 0.571 and class coverage blocks full v1.0: stall 7, knee 0, drop_floor 0. |
+| side | 0.750 | 0.691 | fail | no_visual_crop + gradient boosting | Accuracy remains 0.750 after fresh pose-cache completion; still below the 0.85 side gate. |
+| surface | 0.760 | 0.615 | fail | no_visual_crop + logistic regression | Accuracy remains 0.760; still below gate and label-limited. |
+
+Release label gaps from the current reviewed event files:
+
+| target | current class counts | additional labels needed before release scope |
+| --- | --- | --- |
+| contact type | kick 75, stall 7, knee 0, drop_floor 0 | stall +13, knee +20, drop_floor +20 |
+| side | left 25, right 51 | class-count floor met; model accuracy still fails |
+| surface | inner 7, outer 18 | inner +13, outer +2 |
+
+The event-file inventory confirms the surface gap is real, not a parser miss:
+250 reviewed events contain 84 type labels, 78 wearer-side labels, 25 inner/outer
+surface labels, and 124 explicit `unknown` surface labels.
 
 Feature-mode ablation:
 
 | target | current best | balanced accuracy | prior logistic baseline | result |
 | --- | ---: | ---: | ---: | --- |
-| contact type | 0.951 | 0.779 | 0.902 | Ridge classifier is strongest on the current kick/stall set, but release-scope coverage is still missing stall/knee/drop labels. |
-| side | 0.750 | 0.702 | 0.628 | Balanced tie-break selects logistic regression over ExtraTrees; left recall improves from 0.400 to 0.560 without lowering raw accuracy. |
-| surface | 0.760 | 0.615 | 0.760 | Balanced tie-break selects the all-feature logistic model; inner recall improves from 0.143 to 0.286 without lowering raw accuracy. |
+| contact type | 0.963 | 0.786 | 0.902 | Ridge classifier remains strongest on the current kick/stall set, but release-scope coverage is still missing stall/knee/drop labels. |
+| side | 0.750 | 0.691 | 0.628 | Fresh pose-cache completion changes the selected family but not the raw side accuracy; side remains a semantic/egocentric-foot-identity problem. |
+| surface | 0.760 | 0.615 | 0.760 | Current features do not rescue the 7-inner-row surface set; inner recall remains 0.286. |
 
 Confidence/abstention does not rescue the failing targets:
 
-- Side stays below gate; the selected model reaches 0.750 full coverage / 0.702 balanced accuracy, but high-confidence abstention does not rescue it.
+- Side stays below gate; the selected model reaches 0.750 full coverage / 0.691 balanced accuracy, but high-confidence abstention does not rescue it.
 - All current approved/training side labels are now `wearer_limb`, inferred from the side-specific trick labels you already reviewed.
 - Surface stays below gate; selected model is 0.760 raw / 0.615 balanced accuracy and remains below 0.85 under confidence filtering.
 - Contact type has a raw accuracy pass, but the new release-scope gate correctly keeps it unpromoted until stall/knee/drop_floor class coverage reaches the release floor.
@@ -81,7 +93,11 @@ Current coverage:
 
 | rows | pose present | usable pose distance |
 | ---: | ---: | ---: |
-| 624 | 281 | 259 |
+| 624 | 290 | 268 |
+
+For reviewed contact rows specifically: type has 61/82 usable pose rows, side
+has 57/76, and surface has 20/25. Completing stale pose-cache misses helped
+contact type slightly but did not move side/surface over their gates.
 
 Interpretation:
 
@@ -144,12 +160,12 @@ Current error buckets:
 
 | bucket | count | meaning |
 | --- | ---: | --- |
-| pose_missing | 7 | Pose unavailable at contact time. |
+| side_visual_ambiguity | 7 | Image crop/embedding still cannot infer side reliably. |
+| pose_missing | 6 | Pose unavailable at contact time. |
 | pose_side_disagreement | 6 | Pose side conflicts with the reviewed side. |
-| side_visual_ambiguity | 6 | Image crop/embedding still cannot infer side reliably. |
-| type_motion_ambiguity | 4 | Mostly stall/kick errors; needs dwell/control features and more stall labels. |
-| surface_label_or_geometry_ambiguity | 4 | Inner/outer needs more labels despite embedding gains. |
-| pose_surface_disagreement | 2 | Pose foot-edge geometry conflicts with reviewed surface. |
+| pose_surface_disagreement | 3 | Pose foot-edge geometry conflicts with reviewed surface. |
+| surface_label_or_geometry_ambiguity | 3 | Inner/outer needs more labels despite embedding gains. |
+| type_motion_ambiguity | 3 | Mostly stall/kick errors; needs dwell/control features and more stall labels. |
 
 Representative strips are rendered under:
 
@@ -272,7 +288,7 @@ python3 -m unittest discover tests
 Current result:
 
 ```text
-Ran 278 tests in 7.538s
+Ran 281 tests in 7.469s
 OK
 ```
 
@@ -304,9 +320,9 @@ Do not render these as product facts until the gate passes.
 
 | signal | minimum labels | release gate | current state |
 | --- | ---: | --- | --- |
-| left/right side | >=20 explicit wearer-limb labels per promoted class, >=3 videos | >=85% clip-disjoint side accuracy | 76 wearer-limb rows, 0.750 raw / 0.702 balanced accuracy, fail |
-| inner/outer surface | >=20 per promoted class, >=3 videos | >=85% clip-disjoint surface accuracy | 25 rows, 0.760 raw / 0.615 balanced accuracy, fail |
-| contact type: kick/knee/stall/drop | >=20 per promoted class, >=3 videos | >=85% contact-type accuracy | 82 rows, 0.951 raw / 0.779 balanced accuracy, release-scope fail: stall 7, knee 0, drop_floor 0 |
+| left/right side | >=20 explicit wearer-limb labels per promoted class, >=3 videos | >=85% clip-disjoint side accuracy | 76 wearer-limb rows, 0.750 raw / 0.691 balanced accuracy, fail |
+| inner/outer surface | >=20 per promoted class, >=3 videos | >=85% clip-disjoint surface accuracy | 25 rows, 0.760 raw / 0.615 balanced accuracy, fail; needs +13 inner and +2 outer labels for release-scope coverage |
+| contact type: kick/knee/stall/drop | >=20 per promoted class, >=3 videos | >=85% contact-type accuracy | 82 rows, 0.963 raw / 0.786 balanced accuracy, release-scope fail: stall 7, knee 0, drop_floor 0 |
 | drop/floor reset | enough reviewed positives and negatives across clips | precision >=90%, recall >=90% | 35 clean reviewed reset rows, 0.682 P / 0.714 R after rally-sequence reset features, fail |
 | stall | enough reviewed stall windows and non-stall controls | precision >=85%, recall >=80% | 32 clean reviewed stall candidates, but only 3 approved stalls, not-ready |
 | tricks | >=20 examples per promoted trick | >=80% held-out precision | not ready |
@@ -333,9 +349,9 @@ The next high-yield work is not more scalar pose tweaks. The frozen embedding br
    - Ball-on-foot proximity persistence across multiple frames.
    - Separate stall window positives from kick impulses.
 4. Improve the label plan:
-   - Inner/outer needs at least 20 examples per class, not 7 inner rows.
+   - Inner/outer needs at least 20 examples per class: current gap is +13 inner and +2 outer.
    - Side needs more balanced left rows and clips where left/right alternates cleanly.
-   - Knee/drop/trick labels need their own minimum counts before HUD badges can be promoted.
+   - Contact type needs +13 stall, +20 knee, and +20 drop_floor reviewed examples before full kick/knee/stall/drop release scope.
    - Ambiguous side/surface should stay unknown; noisy labels will hurt more than missing labels.
 5. HUD promotion:
    - Keep v0.1 HUD generic for touches.

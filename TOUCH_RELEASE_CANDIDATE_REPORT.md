@@ -208,11 +208,16 @@ clip-disjoint contact metrics are:
 
 | target | rows | selected model | raw / balanced accuracy | gate |
 | --- | ---: | --- | ---: | --- |
-| contact type | 82 | ridge classifier, no visual crop | 0.951 / 0.779 | raw pass; release-scope fail until stall/knee/drop labels reach the floor |
-| wearer side | 76 | logistic regression, no vision embedding | 0.750 / 0.702 | fail |
-| inner/outer surface | 25 | logistic regression, all features | 0.760 / 0.615 | fail |
+| contact type | 82 | ridge classifier, no visual crop | 0.963 / 0.786 | raw pass; release-scope fail until stall/knee/drop labels reach the floor |
+| wearer side | 76 | gradient boosting, no visual crop | 0.750 / 0.691 | fail |
+| inner/outer surface | 25 | logistic regression, no visual crop | 0.760 / 0.615 | fail |
 | drop/floor reset | 35 | ExtraTrees over OWLv2/L2 + floor/context + merged-touch gap features | 0.682 P / 0.714 R | fail |
 | stall | 32 | n/a | n/a | not ready: 3 approved stalls |
+
+The contact classifier report now includes the exact label inventory and release
+gaps: side has enough left/right count coverage but still fails accuracy;
+surface needs +13 inner and +2 outer labels; full contact type needs +13 stall,
++20 knee, and +20 drop_floor labels before automatic HUD badges can be promoted.
 
 The HUD now shows reviewed contact labels as manual badges when a merged touch
 matches a visual label. These are explicitly label-backed display facts, not
@@ -339,7 +344,7 @@ python3 -m unittest \
   tests.test_release_event_error_audit
 ```
 
-Current result: `278` tests pass.
+Current result: `281` tests pass.
 
 ## Remaining Risks
 
@@ -361,5 +366,5 @@ Current result: `278` tests pass.
 
 1. Improve the trajectory layer on `video-344_singular_display-2` before adding new classifier complexity.
 2. Add a compact indexed detector-track cache so full pipeline refreshes do not rescan the full OWLv2 JSONL each run.
-3. Keep pose/body proximity as a soft diagnostic feature until it demonstrates held-out lift.
+3. Keep pose/body proximity as a soft diagnostic feature until it demonstrates held-out lift; fresh pose-cache completion improved contact type only.
 4. Only after touch timing is stable, resume side/contact-type classification.
