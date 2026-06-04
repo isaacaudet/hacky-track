@@ -150,6 +150,7 @@ class ReleaseStallDropClassifierTests(unittest.TestCase):
             "sequence_track_count_window": 12,
             "floor_context_score": 0.5,
             "candidate_y_ratio": 0.9,
+            "event_next_touch_gap_sec": 1.2,
         }
 
         features = stall_drop.feature_dict(row, disabled_prefixes=stall_drop.FEATURE_MODES["l2_only"])
@@ -158,6 +159,46 @@ class ReleaseStallDropClassifierTests(unittest.TestCase):
         self.assertNotIn("sequence_track_count_window", features)
         self.assertNotIn("floor_context_score", features)
         self.assertNotIn("candidate_y_ratio", features)
+        self.assertNotIn("event_next_touch_gap_sec", features)
+
+    def test_touch_event_stream_features_use_normalized_video_lookup(self) -> None:
+        row = {
+            "video_id": "video-230_singular_display-2",
+            "video_name": "video-230_singular_display 2.MOV",
+            "candidate_time_sec": 10.0,
+        }
+        streams = {
+            "video-230_singular_display-2": [8.5, 11.25],
+        }
+
+        out = stall_drop.add_touch_event_stream_features(row, streams)
+
+        self.assertEqual(out["event_touch_stream_present"], 1.0)
+        self.assertAlmostEqual(out["event_prev_touch_gap_sec"], 1.5)
+        self.assertAlmostEqual(out["event_next_touch_gap_sec"], 1.25)
+        self.assertEqual(out["event_post_gap_gt_1s"], 1.0)
+        self.assertEqual(out["event_pre_gap_gt_1s"], 1.0)
+
+    def test_load_touch_event_streams_indexes_video_name_and_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            events = root / "events.jsonl"
+            write_jsonl(
+                events,
+                [
+                    {
+                        "event_type": "touch",
+                        "video_id": "video-a_singular_display",
+                        "video_name": "video-a_singular_display.MOV",
+                        "time_sec": 1.25,
+                    }
+                ],
+            )
+
+            streams = stall_drop.load_touch_event_streams([events])
+
+            self.assertEqual(streams["video-a_singular_display"], [1.25])
+            self.assertEqual(streams["video-a_singular_display.MOV"], [1.25])
 
 
 if __name__ == "__main__":

@@ -155,7 +155,7 @@ Current v1.0 contact-intelligence status is intentionally split:
 | contact type | candidate, raw kick/stall accuracy passes but release-scope fails without enough stall/knee/drop labels |
 | left/right side | candidate, below release gate |
 | inner/outer surface | candidate, below release gate |
-| automatic drop/floor reset | evaluated candidate, fails gate at 0.652 precision / 0.714 recall after sequence-window/floor-context features |
+| automatic drop/floor reset | evaluated candidate, fails gate at 0.682 precision / 0.714 recall after rally-sequence reset features |
 | automatic stall | not ready; only 3 approved stall examples in the existing reviewed reset/stall corpus |
 
 The release-candidate report is:

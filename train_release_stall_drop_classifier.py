@@ -34,6 +34,10 @@ DEFAULT_DETECTIONS_JSONL = [
     DEFAULT_CORPUS / "owlv2_touch_detections_v1/detections.jsonl",
     DEFAULT_CORPUS / "owlv2_touch_detections_contact_missing_v1/detections.jsonl",
 ]
+DEFAULT_TOUCH_EVENTS_JSONL = [
+    DEFAULT_CORPUS / "touch_classifier_v1/touch_classifier_frozen_events.jsonl",
+    DEFAULT_CORPUS / "touch_classifier_v1/touch_classifier_oof_events.jsonl",
+]
 DEFAULT_THRESHOLD = 0.2
 DEFAULT_BIN_SEC = 0.05
 DEFAULT_MIN_EXAMPLES = 20
@@ -56,6 +60,17 @@ NUMERIC_FEATURES = [
     "candidate_track_y",
     "candidate_y_ratio",
     "detector_confidence_near_candidate",
+    "event_near_touch_within_025",
+    "event_next_touch_gap_sec",
+    "event_no_next_touch",
+    "event_no_prev_touch",
+    "event_post_gap_gt_1s",
+    "event_pre_gap_gt_1s",
+    "event_prev_touch_gap_sec",
+    "event_touch_count_after",
+    "event_touch_count_before",
+    "event_touch_count_total",
+    "event_touch_stream_present",
     "floor_context_score",
     "floor_ground_ratio",
     "floor_sky_ratio",
@@ -105,8 +120,9 @@ BOOLEAN_FEATURES = ["height_reversal"]
 CATEGORICAL_FEATURES = ["trajectory_feature_status"]
 MODEL_FAMILIES = ("logistic_regression", "extra_trees", "gradient_boosting")
 FEATURE_MODES = {
-    "l2_only": ("sequence_", "floor_", "candidate_y_ratio"),
-    "sequence_window": (),
+    "l2_only": ("sequence_", "floor_", "candidate_y_ratio", "event_"),
+    "sequence_window": ("event_",),
+    "rally_sequence": (),
 }
 
 
@@ -338,6 +354,37 @@ def load_compact_tracks(path: Path) -> dict[str, list[TrackPoint]]:
     return dict(tracks)
 
 
+def load_touch_event_streams(paths: list[Path]) -> dict[str, list[float]]:
+    streams: dict[str, set[float]] = defaultdict(set)
+    for path in paths:
+        if not path.exists():
+            continue
+        for row in read_jsonl(path):
+            if str(row.get("event_type") or "touch") != "touch":
+                continue
+            time_sec = safe_float(row.get("time_sec"))
+            if time_sec is None:
+                continue
+            for key in ("video_name", "video_id", "source_video"):
+                value = row.get(key)
+                if value in {None, ""}:
+                    continue
+                text = str(value)
+                streams[text].add(float(time_sec))
+                streams[Path(text).name].add(float(time_sec))
+                streams[normalize_video_id(text)].add(float(time_sec))
+    return {key: sorted(values) for key, values in streams.items()}
+
+
+def summarize_touch_streams(streams: dict[str, list[float]]) -> dict[str, Any]:
+    canonical = {key: values for key, values in streams.items() if key.startswith("video-") and key.endswith(("singular_display", "singular_display-2"))}
+    return {
+        "lookup_keys": len(streams),
+        "canonical_videos": len(canonical),
+        "events_by_video": {key: len(values) for key, values in sorted(canonical.items())},
+    }
+
+
 def nearest_track_point(points: list[TrackPoint], time_sec: float) -> TrackPoint | None:
     if not points:
         return None
@@ -365,6 +412,37 @@ def add_nearest_track_features(row: dict[str, Any], points: list[TrackPoint]) ->
                 "candidate_track_y": round(float(point.y), 6),
             }
         )
+    return out
+
+
+def add_touch_event_stream_features(row: dict[str, Any], touch_streams: dict[str, list[float]]) -> dict[str, Any]:
+    out = dict(row)
+    time_sec = float(row["candidate_time_sec"])
+    times = (
+        touch_streams.get(str(row.get("video_name")))
+        or touch_streams.get(str(row.get("video_id")))
+        or touch_streams.get(normalize_video_id(str(row.get("video_name") or "")))
+        or []
+    )
+    prev_times = [value for value in times if value < time_sec]
+    next_times = [value for value in times if value > time_sec]
+    prev_gap = None if not prev_times else time_sec - prev_times[-1]
+    next_gap = None if not next_times else next_times[0] - time_sec
+    out.update(
+        {
+            "event_touch_stream_present": 1.0 if times else 0.0,
+            "event_touch_count_total": len(times),
+            "event_touch_count_before": len(prev_times),
+            "event_touch_count_after": len(next_times),
+            "event_prev_touch_gap_sec": None if prev_gap is None else round(float(prev_gap), 6),
+            "event_next_touch_gap_sec": None if next_gap is None else round(float(next_gap), 6),
+            "event_near_touch_within_025": 1.0 if any(abs(value - time_sec) <= 0.25 for value in times) else 0.0,
+            "event_no_next_touch": 1.0 if times and not next_times else 0.0,
+            "event_no_prev_touch": 1.0 if times and not prev_times else 0.0,
+            "event_post_gap_gt_1s": 1.0 if times and (not next_times or float(next_gap or 0.0) > 1.0) else 0.0,
+            "event_pre_gap_gt_1s": 1.0 if prev_gap is not None and float(prev_gap) > 1.0 else 0.0,
+        }
+    )
     return out
 
 
@@ -491,6 +569,7 @@ def attach_release_track_features(
     tracks: dict[str, list[TrackPoint]],
     *,
     video_paths: dict[str, str] | None = None,
+    touch_streams: dict[str, list[float]] | None = None,
     min_points: int = 12,
     max_track_gap_sec: float = DEFAULT_MAX_TRACK_GAP_SEC,
     break_tolerance_sec: float = DEFAULT_BREAK_TOLERANCE_SEC,
@@ -514,6 +593,7 @@ def attach_release_track_features(
             video_dimension_cache[video_name] = video_dimensions(video_path)
         width, height = video_dimension_cache[video_name]
         updated = add_sequence_window_features(updated, points, video_path=video_path, width=width, height=height)
+        updated = add_touch_event_stream_features(updated, touch_streams or {})
         out_rows.append(updated)
         stats = per_video.setdefault(
             video_name,
@@ -724,6 +804,11 @@ def train_target(
                     "trajectory_y_range_window_px": row.get("trajectory_y_range_window_px"),
                     "candidate_track_confidence": row.get("candidate_track_confidence"),
                     "candidate_y_ratio": row.get("candidate_y_ratio"),
+                    "event_next_touch_gap_sec": row.get("event_next_touch_gap_sec"),
+                    "event_no_next_touch": row.get("event_no_next_touch"),
+                    "event_post_gap_gt_1s": row.get("event_post_gap_gt_1s"),
+                    "event_prev_touch_gap_sec": row.get("event_prev_touch_gap_sec"),
+                    "event_touch_stream_present": row.get("event_touch_stream_present"),
                     "floor_context_score": row.get("floor_context_score"),
                     "floor_ground_ratio": row.get("floor_ground_ratio"),
                     "floor_sky_ratio": row.get("floor_sky_ratio"),
@@ -907,7 +992,7 @@ def render_error_strip(
     )
     cv2.putText(
         canvas,
-        f"y_ratio={fmt_metric(row.get('candidate_y_ratio'))} floor={fmt_metric(row.get('floor_context_score'))} low_screen={fmt_metric(row.get('sequence_low_screen_ratio_window'))} gap={fmt_metric(row.get('sequence_longest_gap_sec'))}",
+        f"y_ratio={fmt_metric(row.get('candidate_y_ratio'))} floor={fmt_metric(row.get('floor_context_score'))} low={fmt_metric(row.get('sequence_low_screen_ratio_window'))} next_touch_gap={fmt_metric(row.get('event_next_touch_gap_sec'))}",
         (12, 84),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.42,
@@ -1014,6 +1099,9 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
     ]
     for detection_path in summary.get("detections_jsonl") or []:
         lines.append(f"- `{detection_path}`")
+    lines.extend(["", "Touch-event stream inputs:", ""])
+    for event_path in summary.get("touch_events_jsonl") or []:
+        lines.append(f"- `{event_path}`")
     lines.extend(
         [
             "",
@@ -1030,6 +1118,7 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
         "",
         f"- Compact points: `{summary['compact_track_manifest']['kept_points']}`",
         f"- Feature rows with usable L2 status: `{summary['feature_summary']['ok_rows']}` / `{summary['feature_summary']['rows']}`",
+        f"- Touch-event stream videos: `{summary.get('touch_event_stream_summary', {}).get('canonical_videos', 0)}`",
         "",
         "## Gates",
         "",
@@ -1100,8 +1189,8 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
             "",
             "- This uses existing reviewed reset/stall decisions; it does not ask for duplicate labels.",
             "- The supplemental stall/drop OWLv2 cache removes missing-track confounds.",
-            "- The sequence-window/floor-context ablation is compared against the prior L2-only baseline; it is selected only when leave-one-video-out metrics improve.",
-            "- Failure after full coverage and sequence-window context means the remaining automatic drop/reset problem is not a simple detector-coverage or single-frame floor-context issue.",
+            "- The sequence-window/floor-context and rally-sequence ablations are compared against the prior L2-only baseline; a richer mode is selected only when leave-one-video-out metrics improve.",
+            "- Failure after full coverage, floor context, and available merged-touch gap context means the remaining automatic drop/reset problem is not a simple detector-coverage or point-local reset issue.",
             "- Drop/stall badges should remain unpromoted unless the target gate passes and downstream HUD integration is explicitly wired.",
             "- Stall is expected to remain label-limited when approved examples are scarce.",
         ]
@@ -1123,10 +1212,12 @@ def run_stall_drop_classifier(args: argparse.Namespace) -> dict[str, Any]:
         compact_manifest = read_json(manifest_path) if manifest_path.exists() else {"cache_path": str(compact_cache), "kept_points": len(read_jsonl(compact_cache))}
     tracks = load_compact_tracks(compact_cache)
     video_paths = video_paths_with_download_fallback(args.review_manifest)
+    touch_streams = load_touch_event_streams(args.touch_events_jsonl)
     feature_rows, feature_summary = attach_release_track_features(
         review_rows,
         tracks,
         video_paths=video_paths,
+        touch_streams=touch_streams,
         min_points=args.min_points,
         max_track_gap_sec=args.max_track_gap_sec,
         break_tolerance_sec=args.break_tolerance_sec,
@@ -1154,6 +1245,8 @@ def run_stall_drop_classifier(args: argparse.Namespace) -> dict[str, Any]:
         "out_dir": str(out_dir),
         "threshold": args.threshold,
         "detections_jsonl": [str(path) for path in args.detections_jsonl],
+        "touch_events_jsonl": [str(path) for path in args.touch_events_jsonl],
+        "touch_event_stream_summary": summarize_touch_streams(touch_streams),
         "compact_track_cache": str(compact_cache),
         "compact_track_manifest": compact_manifest,
         "review_row_summary": review_summary,
@@ -1172,6 +1265,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train/evaluate release stall/drop classifiers from reviewed labels")
     parser.add_argument("--review-labels", type=Path, default=DEFAULT_REVIEW_LABELS)
     parser.add_argument("--detections-jsonl", type=Path, action="append", default=list(DEFAULT_DETECTIONS_JSONL))
+    parser.add_argument("--touch-events-jsonl", type=Path, action="append", default=list(DEFAULT_TOUCH_EVENTS_JSONL))
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     parser.add_argument("--compact-track-cache", type=Path)
     parser.add_argument("--force-compact-track-cache", action="store_true")
