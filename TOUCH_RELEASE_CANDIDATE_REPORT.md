@@ -263,7 +263,7 @@ This verifies the clip that was missing from the primary detection cache:
 - Frozen-test rows remain held out from training and cross-validation.
 - Release HUD event docs can include reviewed stall/drop events with OWLv2/L2 anchors.
 - Release HUD event docs can attach reviewed contact labels to matched touch events as manual badges.
-- Rally analytics now reports best rally, touch rate, longest gap, and exact FP/FN times.
+- Rally analytics now reports aggregate and per-video best rally, touch rate, longest gap, rendered reviewed stall/drop counts, and exact FP/FN times.
 - Rally analytics now reports manual contact badge coverage separately from automatic touch metrics.
 - Contact side/type has a separate readiness/evaluation path instead of being mixed into touch timing.
 

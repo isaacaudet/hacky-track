@@ -26,18 +26,20 @@ class ReleaseRallyAnalyticsTests(unittest.TestCase):
                         "start_sec": 0.8,
                         "end_sec": 4.2,
                         "events": [
-                                {"type": "touch", "time_sec": 1.0},
-                                {
-                                    "type": "touch",
-                                    "time_sec": 2.0,
-                                    "manual_contact_label": True,
-                                    "contact_type": "kick",
-                                    "contact_side": "left",
-                                    "contact_surface": "inner",
-                                },
-                                {"type": "touch", "time_sec": 4.0},
-                            ],
-                        }
+                            {"type": "touch", "time_sec": 1.0},
+                            {
+                                "type": "touch",
+                                "time_sec": 2.0,
+                                "manual_contact_label": True,
+                                "contact_type": "kick",
+                                "contact_side": "left",
+                                "contact_surface": "inner",
+                            },
+                            {"type": "stall", "time_sec": 2.4},
+                            {"type": "touch", "time_sec": 4.0},
+                            {"type": "drop_floor", "time_sec": 4.3},
+                        ],
+                    }
                 ],
             }
             write_json(root / "hud" / "video-test" / "release_touch_hud_events.json", hud_doc)
@@ -71,10 +73,24 @@ class ReleaseRallyAnalyticsTests(unittest.TestCase):
             self.assertEqual(summary["false_negative_times_sec"], [3.0])
             self.assertEqual(len(errors), 3)
             self.assertEqual(summary["best_rally"]["touches"], 3)
+            self.assertEqual(summary["rendered_stalls"], 1)
+            self.assertEqual(summary["rendered_drop_floor"], 1)
+            self.assertAlmostEqual(summary["total_rally_duration_sec"], 3.4)
+            self.assertAlmostEqual(summary["touch_rate_per_sec"], 3 / 3.4)
+            self.assertEqual(summary["longest_gap_sec"], 2.0)
             self.assertEqual(summary["manual_contact_labels"], 1)
             self.assertEqual(summary["manual_contact_side_labels"], 1)
             self.assertEqual(summary["manual_contact_surface_labels"], 1)
             self.assertEqual(summary["rally_rows"][0]["manual_contact_labels"], 1)
+
+            aggregate = analytics.aggregate_video_summaries([summary])
+            self.assertEqual(aggregate["rendered_stalls"], 1)
+            self.assertEqual(aggregate["rendered_drop_floor"], 1)
+            self.assertAlmostEqual(aggregate["total_rally_duration_sec"], 3.4)
+            self.assertAlmostEqual(aggregate["touch_rate_per_sec"], 3 / 3.4)
+            self.assertEqual(aggregate["longest_gap_sec"], 2.0)
+            self.assertEqual(aggregate["best_rally"]["video_id"], "video-test")
+            self.assertEqual(aggregate["best_rally"]["touches"], 3)
 
 
 if __name__ == "__main__":

@@ -237,7 +237,7 @@ Code changes:
 - `render_touch_release_hud.py` now attaches reviewed contact labels to matched merged touch events as manual HUD badges, with provenance and match deltas.
 - `render_touch_release_hud.py` and `hackytrack.py touch-release` now accept multiple OWLv2 detection JSONLs, so supplemental contact-missing caches are not silently dropped.
 - `run_touch_pipeline.py` now records the actual detection JSONL inputs in the status report and prints a reproducible release command using those inputs.
-- `release_rally_analytics.py` now reports manual contact badge coverage separately from automatic touch metrics.
+- `release_rally_analytics.py` now reports aggregate/per-video best rally, touch rate, longest gap, rendered reviewed stall/drop counts, exact FP/FN times, and manual contact badge coverage separately from automatic touch metrics.
 - `side_semantics_audit.py` audits side labels against pose and screen-side conventions, with visual disagreement strips.
 - `touch_review_app.py` and contact-label parsing support the full label vocabulary: left/right kick, inner/outer, knee, stall, and ground/drop.
 - `touch_review_app.py` now persists `contact_side_basis` and explicitly defines side as the contacting limb / wearer side, not screen-left/right.

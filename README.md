@@ -212,7 +212,7 @@ and badge-rendering checks.
 | `summarize_detector_batch.py` | Summarizes detector batch coverage, interpolation share, and per-video failure flags. |
 | `run_touch_pipeline.py` | Runs the fixed-OWLv2 touch-classifier corpus pipeline and release gates. |
 | `render_touch_release_hud.py` | Converts merged classifier touch events into HUD event docs and renders release HUD overlays. |
-| `release_rally_analytics.py` | Summarizes rendered release rallies and reports exact false-positive/missed touch times against visual labels. |
+| `release_rally_analytics.py` | Summarizes rendered release rallies, best rally, touch rate, longest gap, reviewed stall/drop counts, contact badge coverage, and exact FP/FN times. |
 | `release_event_error_audit.py` | Renders visual strips for remaining merged-event FP/FN cases with frames, ball-track graph, audio, and trajectory cues. |
 | `train_touch_classifier.py` | Trains/evaluates the fused audio + trajectory touch classifier and writes merged event outputs. |
 | `train_release_contact_classifier.py` | Separate readiness/eval gate for left/right/contact-type labels using pose proximity when labels/features exist. |

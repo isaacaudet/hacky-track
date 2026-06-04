@@ -245,6 +245,8 @@ def analyze_video(events_path: Path, labels_dir: Path, legacy_events_dir: Path, 
     rallies = rally_rows(doc)
     contact_badges = contact_badge_summary(doc)
     best_rally = max(rallies, key=lambda row: (int(row["touches"]), float(row["duration_sec"] or 0.0)), default=None)
+    total_rally_duration = sum(float(row.get("duration_sec") or 0.0) for row in rallies)
+    longest_gaps = [float(row["longest_gap_sec"]) for row in rallies if row.get("longest_gap_sec") is not None]
     metrics = precision_recall(len(matches), len(false_positive_rows), len(false_negative_rows))
     summary = {
         "video_id": video_id,
@@ -256,10 +258,15 @@ def analyze_video(events_path: Path, labels_dir: Path, legacy_events_dir: Path, 
         "truth_touches": len(truth_touches),
         "truth_stalls": sum(1 for event in label_events if event.type == "stall"),
         "truth_drop_floor": sum(1 for event in label_events if event.type == "drop_floor"),
+        "rendered_stalls": sum(int(row.get("stalls") or 0) for row in rallies),
+        "rendered_drop_floor": sum(int(row.get("drops") or 0) for row in rallies),
         **contact_badges,
         "rallies": len(rallies),
         "best_rally": best_rally,
         "rally_rows": rallies,
+        "total_rally_duration_sec": round(total_rally_duration, 6),
+        "touch_rate_per_sec": None if total_rally_duration <= 0 else len(predicted_touches) / total_rally_duration,
+        "longest_gap_sec": None if not longest_gaps else max(longest_gaps),
         "touch_metrics": metrics,
         "false_positive_times_sec": [row["time_sec"] for row in false_positive_rows],
         "false_negative_times_sec": [row["time_sec"] for row in false_negative_rows],
@@ -271,13 +278,31 @@ def aggregate_video_summaries(videos: list[dict[str, Any]]) -> dict[str, Any]:
     tp = sum(int((video.get("touch_metrics") or {}).get("true_positive") or 0) for video in videos)
     fp = sum(int((video.get("touch_metrics") or {}).get("false_positive") or 0) for video in videos)
     fn = sum(int((video.get("touch_metrics") or {}).get("false_negative") or 0) for video in videos)
+    rally_rows: list[dict[str, Any]] = []
+    for video in videos:
+        for row in video.get("rally_rows") or []:
+            rally_rows.append({**row, "video_id": video.get("video_id"), "source_video": video.get("source_video")})
+    total_rally_duration = sum(float(video.get("total_rally_duration_sec") or 0.0) for video in videos)
+    longest_gaps = [float(video["longest_gap_sec"]) for video in videos if video.get("longest_gap_sec") is not None]
+    best_rally = max(
+        rally_rows,
+        key=lambda row: (int(row.get("touches") or 0), float(row.get("duration_sec") or 0.0)),
+        default=None,
+    )
+    predicted_touches = sum(int(video.get("predicted_touches") or 0) for video in videos)
     return {
         "videos": len(videos),
         "rallies": sum(int(video.get("rallies") or 0) for video in videos),
-        "predicted_touches": sum(int(video.get("predicted_touches") or 0) for video in videos),
+        "predicted_touches": predicted_touches,
         "truth_touches": sum(int(video.get("truth_touches") or 0) for video in videos),
         "truth_stalls": sum(int(video.get("truth_stalls") or 0) for video in videos),
         "truth_drop_floor": sum(int(video.get("truth_drop_floor") or 0) for video in videos),
+        "rendered_stalls": sum(int(video.get("rendered_stalls") or 0) for video in videos),
+        "rendered_drop_floor": sum(int(video.get("rendered_drop_floor") or 0) for video in videos),
+        "total_rally_duration_sec": round(total_rally_duration, 6),
+        "touch_rate_per_sec": None if total_rally_duration <= 0 else predicted_touches / total_rally_duration,
+        "longest_gap_sec": None if not longest_gaps else max(longest_gaps),
+        "best_rally": best_rally,
         "manual_contact_labels": sum(int(video.get("manual_contact_labels") or 0) for video in videos),
         "manual_contact_side_labels": sum(int(video.get("manual_contact_side_labels") or 0) for video in videos),
         "manual_contact_surface_labels": sum(int(video.get("manual_contact_surface_labels") or 0) for video in videos),
@@ -307,20 +332,32 @@ def write_report(path: Path, manifest: dict[str, Any]) -> None:
     ]
     agg = manifest["aggregate"]
     m = agg["touch_metrics"]
+    best = agg.get("best_rally") or {}
+    best_text = (
+        "-"
+        if not best
+        else f"{best.get('video_id')} R{best.get('rally_id')} "
+        f"{best.get('touches')} touches / {fmt(best.get('duration_sec'))}s"
+    )
     lines.extend(
         [
             f"- Videos: `{agg['videos']}`",
             f"- Rallies: `{agg['rallies']}`",
+            f"- Touches / total rally duration: `{agg['predicted_touches']}` / `{fmt(agg.get('total_rally_duration_sec'))}` sec",
+            f"- Aggregate touch rate: `{fmt(agg.get('touch_rate_per_sec'))}` touches/sec",
+            f"- Longest intra-rally touch gap: `{fmt(agg.get('longest_gap_sec'))}` sec",
+            f"- Best rally: `{best_text}`",
             f"- Touch precision/recall/F1: `{fmt(m['precision'])}` / `{fmt(m['recall'])}` / `{fmt(m['f1'])}`",
             f"- FP/FN: `{m['false_positive']}` / `{m['false_negative']}`",
-            f"- Reviewed stalls/drop_floor available: `{agg['truth_stalls']}` / `{agg['truth_drop_floor']}`",
+            f"- Rendered reviewed stalls/drop_floor: `{agg.get('rendered_stalls', 0)}` / `{agg.get('rendered_drop_floor', 0)}`",
+            f"- Reviewed label stalls/drop_floor available: `{agg['truth_stalls']}` / `{agg['truth_drop_floor']}`",
             f"- Manual reviewed contact badges: `{agg['manual_contact_labels']}` "
             f"(side `{agg['manual_contact_side_labels']}`, surface `{agg['manual_contact_surface_labels']}`, type `{agg['manual_contact_type_labels']}`)",
             "",
             "## Per Video",
             "",
-            "| video | split/source | pred | truth | P | R | FP | FN | manual badges | side/surface | rallies | best rally |",
-            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- |",
+            "| video | split/source | pred | truth | P | R | FP | FN | rate | gap | stalls/drops | manual badges | side/surface | rallies | best rally |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- |",
         ]
     )
     for video in manifest["videos"]:
@@ -330,6 +367,8 @@ def write_report(path: Path, manifest: dict[str, Any]) -> None:
         lines.append(
             f"| `{video['video_id']}` | `{video.get('source_video')}` | {video['predicted_touches']} | {video['truth_touches']} | "
             f"{fmt(m['precision'])} | {fmt(m['recall'])} | {m['false_positive']} | {m['false_negative']} | "
+            f"{fmt(video.get('touch_rate_per_sec'))} | {fmt(video.get('longest_gap_sec'))} | "
+            f"{video.get('rendered_stalls', 0)}/{video.get('rendered_drop_floor', 0)} | "
             f"{video.get('manual_contact_labels', 0)} | {video.get('manual_contact_side_labels', 0)}/{video.get('manual_contact_surface_labels', 0)} | "
             f"{video['rallies']} | {best_text} |"
         )
