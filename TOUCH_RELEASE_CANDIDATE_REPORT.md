@@ -208,7 +208,7 @@ clip-disjoint contact metrics are:
 
 | target | rows | selected model | raw / balanced accuracy | gate |
 | --- | ---: | --- | ---: | --- |
-| contact type | 82 | ridge classifier, no visual crop | 0.963 / 0.786 | raw pass; release-scope fail until stall/knee/drop labels reach the floor |
+| contact type | 82 | ridge classifier, no visual crop and no foot-track | 0.963 / 0.786 | raw pass; release-scope fail until stall/knee/drop labels reach the floor |
 | wearer side | 76 | LinearSVC, no visual features; diagnostic temporal smoothing | 0.776 / 0.752 raw, 0.816 / 0.791 smoothed | fail; smoothing remains diagnostic-only |
 | inner/outer surface | 25 | gradient boosting, pose only | 0.800 / 0.643 | fail |
 | drop/floor reset | 35 | ExtraTrees over OWLv2/L2 + floor/context + merged-touch gap features | 0.682 P / 0.714 R | fail |
@@ -249,9 +249,23 @@ runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/contact_err
 runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/contact_error_audit/sequence_smoothed_strips/
 ```
 
-The smoothed-side audit leaves 14 held-out failures: 5 pose-side disagreements,
-6 visual-ambiguity cases, and 3 pose-missing cases. This is why the side layer
+The smoothed-side audit leaves 15 held-out failures: 4 pose-side disagreements,
+6 visual-ambiguity cases, and 5 pose-missing cases. This is why the side layer
 stays diagnostic-only.
+
+Foot-track feature artifact:
+
+```text
+runs/release-27-public/touch_corpus_v1/touch_training_dataset_v1/touch_foot_track_feature_report.md
+```
+
+The current implementation uses the prebuilt RTMW/rtmlib foot keypoints as the
+foot-region backend and adds temporal continuity features around each candidate
+(`foot_track_*`). It also writes label-derived `manual_foot_*` calibration fields
+for reviewed/manual display workflows only. Those manual fields are deliberately
+excluded from automatic classifier features. In clip-disjoint evaluation the
+automatic foot-track features do not improve side or surface enough to promote
+HUD badges, and the selected release-safe modes exclude them where they hurt.
 
 Supplemental detection-cache smoke check:
 

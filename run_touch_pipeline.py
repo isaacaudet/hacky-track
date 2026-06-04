@@ -18,6 +18,7 @@ from typing import Any
 from attach_touch_l2_features import attach_dataset
 from attach_touch_audio_features import attach_dataset as attach_audio_dataset
 from attach_touch_flow_features import attach_dataset as attach_flow_dataset
+from attach_touch_foot_track_features import attach_dataset as attach_foot_track_dataset
 from attach_touch_pose_features import attach_dataset as attach_pose_dataset
 from attach_touch_visual_crop_features import attach_dataset as attach_visual_crop_dataset
 from attach_touch_vision_embedding_features import attach_dataset as attach_vision_embedding_dataset
@@ -181,6 +182,28 @@ def vision_embedding_feature_summary_for_status(manifest: dict[str, Any] | None)
     }
 
 
+def foot_track_feature_summary_for_status(manifest: dict[str, Any] | None) -> dict[str, Any]:
+    if not manifest:
+        return {
+            "status": "skipped",
+            "train_val_rows": 0,
+            "train_val_ok_rows": 0,
+            "train_val_manual_calibrated_rows": 0,
+            "test_frozen_rows": 0,
+            "test_frozen_ok_rows": 0,
+            "test_frozen_manual_calibrated_rows": 0,
+        }
+    return {
+        "status": manifest.get("status"),
+        "train_val_rows": (manifest.get("train_val") or {}).get("rows", 0),
+        "train_val_ok_rows": (manifest.get("train_val") or {}).get("ok_rows", 0),
+        "train_val_manual_calibrated_rows": (manifest.get("train_val") or {}).get("manual_calibrated_rows", 0),
+        "test_frozen_rows": (manifest.get("test_frozen") or {}).get("rows", 0),
+        "test_frozen_ok_rows": (manifest.get("test_frozen") or {}).get("ok_rows", 0),
+        "test_frozen_manual_calibrated_rows": (manifest.get("test_frozen") or {}).get("manual_calibrated_rows", 0),
+    }
+
+
 def should_run_diagnostic_classifier(classifier_summary: dict[str, Any], *, audio_only: bool) -> bool:
     """Train a non-release diagnostic model when frozen-test labels are the only hard blocker."""
     if audio_only or classifier_summary.get("status") != "not_ready":
@@ -251,6 +274,8 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
         f"- Optical-flow train/test rows: `{summary['flow_features'].get('train_val_ok_rows')}` / `{summary['flow_features'].get('test_frozen_ok_rows')}`",
         f"- Pose feature status: `{summary['pose_features'].get('status')}`",
         f"- Pose train/test foot-present rows: `{summary['pose_features'].get('train_val_foot_present_rows')}` / `{summary['pose_features'].get('test_frozen_foot_present_rows')}`",
+        f"- Foot-track status: `{summary['foot_track_features'].get('status')}`",
+        f"- Foot-track train/test rows: `{summary['foot_track_features'].get('train_val_ok_rows')}` / `{summary['foot_track_features'].get('test_frozen_ok_rows')}`",
         f"- Visual-crop status: `{summary['visual_crop_features'].get('status')}`",
         f"- Visual-crop train/test rows: `{summary['visual_crop_features'].get('train_val_ok_rows')}` / `{summary['visual_crop_features'].get('test_frozen_ok_rows')}`",
         f"- Vision-embedding status: `{summary['vision_embedding_features'].get('status')}`",
@@ -589,6 +614,19 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         )
     pose_summary = pose_feature_summary_for_status(pose_manifest)
 
+    foot_track_manifest: dict[str, Any] | None = None
+    if args.attach_foot_track_features:
+        foot_track_manifest = attach_foot_track_dataset(
+            argparse.Namespace(
+                dataset_dir=l2_out_dir,
+                out_dir=l2_out_dir,
+                labels_dir=labels_dir,
+                label_match_tolerance_sec=args.touch_tolerance_sec,
+                window_sec=args.foot_track_window_sec,
+            )
+        )
+    foot_track_summary = foot_track_feature_summary_for_status(foot_track_manifest)
+
     visual_crop_manifest: dict[str, Any] | None = None
     if args.attach_visual_crop_features:
         visual_crop_manifest = attach_visual_crop_dataset(
@@ -691,6 +729,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             "audio_feature_manifest": str(dataset_dir / "touch_audio_feature_manifest.json"),
             "flow_feature_manifest": str(dataset_dir / "touch_flow_feature_manifest.json"),
             "pose_feature_manifest": str(dataset_dir / "touch_pose_feature_manifest.json"),
+            "foot_track_feature_manifest": str(dataset_dir / "touch_foot_track_feature_manifest.json"),
             "visual_crop_feature_manifest": str(dataset_dir / "touch_visual_crop_feature_manifest.json"),
             "vision_embedding_feature_manifest": str(dataset_dir / "touch_vision_embedding_feature_manifest.json"),
         },
@@ -738,6 +777,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         "audio_features": audio_summary,
         "flow_features": flow_summary,
         "pose_features": pose_summary,
+        "foot_track_features": foot_track_summary,
         "visual_crop_features": visual_crop_summary,
         "vision_embedding_features": vision_embedding_summary,
         "release_gate": release_gate,
@@ -839,6 +879,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pose-ball-tolerance-sec", type=float, default=0.08)
     parser.add_argument("--pose-cache-path", type=Path)
     parser.add_argument("--pose-cache-only", action="store_true", help="attach only pose rows already in the pose cache")
+    parser.add_argument("--attach-foot-track-features", action="store_true", help="attach temporal foot identity/continuity features from existing RTMW pose geometry")
+    parser.add_argument("--foot-track-window-sec", type=float, default=1.0)
     parser.add_argument("--attach-visual-crop-features", action="store_true", help="attach cached ball-centered visual crop descriptors for contact side/surface classification")
     parser.add_argument("--visual-crop-ball-tolerance-sec", type=float, default=0.08)
     parser.add_argument("--visual-crop-size-px", type=int, default=224)

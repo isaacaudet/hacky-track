@@ -552,6 +552,51 @@ class ReleaseContactClassifierTests(unittest.TestCase):
         self.assertNotIn("trajectory_impulse_score", features)
         self.assertNotIn("audio_strength", features)
 
+    def test_feature_dict_includes_automatic_foot_track_but_excludes_manual_calibration(self) -> None:
+        row = {
+            "foot_track_nearest_pose_side": "left",
+            "foot_track_nearest_pose_side_confidence": 0.8,
+            "manual_foot_calibrated_side": "right",
+            "manual_foot_calibrated_side_confidence": 1.0,
+        }
+
+        features = contact.contact_feature_dict(row)
+
+        self.assertEqual(features["foot_track_nearest_pose_side"], "left")
+        self.assertEqual(features["foot_track_nearest_pose_side_confidence"], 0.8)
+        self.assertNotIn("manual_foot_calibrated_side", features)
+        self.assertNotIn("manual_foot_calibrated_side_confidence", features)
+
+    def test_feature_dict_can_disable_visual_and_foot_track_features_together(self) -> None:
+        row = {
+            "pose_nearest_foot_dist_px": 12.0,
+            "visual_ball_x_norm": 0.3,
+            "vision_embedding_000": 0.1,
+            "foot_track_nearest_pose_side_confidence": 0.8,
+        }
+
+        features = contact.contact_feature_dict(row, disabled_prefixes=contact.CONTACT_FEATURE_MODES["no_visual_features_no_foot_track"])
+
+        self.assertIn("pose_nearest_foot_dist_px", features)
+        self.assertNotIn("visual_ball_x_norm", features)
+        self.assertNotIn("vision_embedding_000", features)
+        self.assertNotIn("foot_track_nearest_pose_side_confidence", features)
+
+    def test_feature_dict_can_disable_visual_crop_and_foot_track_while_keeping_embeddings(self) -> None:
+        row = {
+            "pose_nearest_foot_dist_px": 12.0,
+            "visual_ball_x_norm": 0.3,
+            "vision_embedding_000": 0.1,
+            "foot_track_nearest_pose_side_confidence": 0.8,
+        }
+
+        features = contact.contact_feature_dict(row, disabled_prefixes=contact.CONTACT_FEATURE_MODES["no_visual_crop_no_foot_track"])
+
+        self.assertIn("pose_nearest_foot_dist_px", features)
+        self.assertIn("vision_embedding_000", features)
+        self.assertNotIn("visual_ball_x_norm", features)
+        self.assertNotIn("foot_track_nearest_pose_side_confidence", features)
+
     def test_ridge_classifier_is_available_as_bounded_contact_model_family(self) -> None:
         model = contact.build_model("ridge_classifier")
 

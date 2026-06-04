@@ -164,6 +164,14 @@ fails even after diagnostic temporal smoothing; surface needs +13 inner and +2
 outer reviewed labels; contact type needs +13 stall, +20 knee, and +20
 drop_floor examples before full v1.0 scope.
 
+Foot position is handled as a layered feature source, not a solved library call.
+RTMW/rtmlib provides the prebuilt foot landmarks; `attach_touch_foot_track_features.py`
+builds temporal `foot_track_*` continuity features from those landmarks and
+separate label-derived `manual_foot_*` calibration fields for manual/visual
+workflows. The automatic foot-track features are measured in the contact
+classifier ablation, but current side/surface gates still fail, so automatic HUD
+side/surface badges remain unpromoted.
+
 The separate model-only touch-stream exporter can fill unreviewed touch context
 for reset/stall experiments:
 
@@ -221,7 +229,8 @@ and badge-rendering checks.
 | `release_rally_analytics.py` | Summarizes rendered release rallies, best rally, touch rate, longest gap, reviewed stall/drop counts, contact badge coverage, and exact FP/FN times. |
 | `release_event_error_audit.py` | Renders visual strips for remaining merged-event FP/FN cases with frames, ball-track graph, audio, and trajectory cues. |
 | `train_touch_classifier.py` | Trains/evaluates the fused audio + trajectory touch classifier and writes merged event outputs. |
-| `train_release_contact_classifier.py` | Separate readiness/eval gate for left/right/contact-type labels using pose proximity when labels/features exist. |
+| `attach_touch_foot_track_features.py` | Adds RTMW-based temporal foot-continuity features plus label-derived manual foot calibration fields for visual-corrected workflows. |
+| `train_release_contact_classifier.py` | Separate readiness/eval gate for left/right/contact-type labels using pose, visual crop, embedding, and foot-track features when labels/features exist. |
 | `detect_atw_overlay.py` | Experimental footbag/foot heuristic for around-the-world detection. |
 
 ## Quickstart

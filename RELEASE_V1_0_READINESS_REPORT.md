@@ -50,8 +50,8 @@ Clip-disjoint leave-one-video-out results:
 
 | target | accuracy | balanced accuracy | gate | selected feature mode | interpretation |
 | --- | ---: | ---: | --- | --- | --- |
-| contact type | 0.963 | 0.786 | raw pass / release-scope fail | no_visual_crop + ridge classifier | Fresh pose-cache completion removes one kick/stall error, but stall recall is still only 0.571 and class coverage blocks full v1.0: stall 7, knee 0, drop_floor 0. |
-| side | 0.776 raw; 0.816 smoothed diagnostic | 0.752 raw; 0.791 smoothed diagnostic | fail | no_visual_features + linear SVC; temporal sequence smoothing | Bounded LinearSVC improves side over the prior 0.750 result, and diagnostic sequence smoothing fixes 3 more held-out side rows, but still misses the 0.85 side gate and remains unpromoted. |
+| contact type | 0.963 | 0.786 | raw pass / release-scope fail | no_visual_crop_no_foot_track + ridge classifier | Fresh pose-cache completion removes one kick/stall error, but stall recall is still only 0.571 and class coverage blocks full v1.0: stall 7, knee 0, drop_floor 0. |
+| side | 0.776 raw; 0.816 smoothed diagnostic | 0.752 raw; 0.791 smoothed diagnostic | fail | no_visual_features_no_foot_track + linear SVC; temporal sequence smoothing | Bounded LinearSVC improves side over the prior 0.750 result, and diagnostic sequence smoothing helps, but still misses the 0.85 side gate and remains unpromoted. |
 | surface | 0.800 | 0.643 | fail | pose_only + gradient boosting | Pose-only surface model improves raw surface accuracy to 0.800, but inner recall remains 0.286 and the target is still label-limited. |
 
 Release label gaps from the current reviewed event files:
@@ -148,6 +148,37 @@ Interpretation:
 - Visual features improve inner/outer surface accuracy from 0.640 to 0.760, but still miss the 0.85 gate.
 - It does not solve side; side remains a label/semantics/egocentric-foot-identity problem.
 
+### Foot-Track Features
+
+New artifact:
+
+```text
+runs/release-27-public/touch_corpus_v1/touch_training_dataset_v1/touch_foot_track_feature_report.md
+```
+
+Current coverage:
+
+| split | rows | automatic foot-track rows | manual-calibrated rows |
+| --- | ---: | ---: | ---: |
+| train + validation | 283 | 147 | 9 |
+| frozen test | 341 | 121 | 114 |
+
+Interpretation:
+
+- There is no prebuilt library that directly outputs Ray-Ban POV footbag
+  `left_inner_kick` / `right_outer_stall` semantics. The practical prebuilt
+  backend is RTMW/rtmlib: it supplies lower-body and foot landmarks.
+- `attach_touch_foot_track_features.py` now builds label-free temporal
+  foot-continuity features (`foot_track_*`) from those RTMW landmarks.
+- The same stage also writes label-derived `manual_foot_*` calibration fields
+  from existing reviewed trick labels, but those are excluded from automatic
+  classifier features and are only suitable for manual/visual-corrected display
+  workflows.
+- In the current clip-disjoint metrics, automatic foot-track features do not
+  improve side or surface enough to promote automatic HUD badges. The classifier
+  therefore keeps no-foot-track feature modes available and selects them where
+  foot-track features hurt.
+
 ### Contact Error Audit
 
 New artifact:
@@ -180,9 +211,9 @@ runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/contact_err
 runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/contact_error_audit/sequence_smoothed_strips/
 ```
 
-Temporal smoothing reduces side errors from 17 to 14. The remaining smoothed
-side failures are still mixed: 5 pose-side disagreements, 6 visual-ambiguity
-cases, and 3 pose-missing cases. That proves smoothing is a useful diagnostic
+Temporal smoothing reduces side errors from 17 to 15. The remaining smoothed
+side failures are still mixed: 4 pose-side disagreements, 6 visual-ambiguity
+cases, and 5 pose-missing cases. That proves smoothing is a useful diagnostic
 feature, but not a sufficient release strategy.
 
 ### Side Semantics Audit
@@ -255,9 +286,12 @@ Code changes:
 
 - `attach_touch_visual_crop_features.py` adds cached ball-centered visual crop descriptors and normalized ball position features.
 - `attach_touch_vision_embedding_features.py` adds cached frozen OWLv2 crop embeddings for reviewed contact rows or all rows.
+- `attach_touch_foot_track_features.py` adds RTMW-based temporal foot-continuity features and separate label-derived manual foot calibration fields.
 - `run_touch_pipeline.py` can attach visual crop features via `--attach-visual-crop-features` and reports their status.
 - `run_touch_pipeline.py` can attach OWLv2 crop embeddings via `--attach-vision-embedding-features` and reports their status.
+- `run_touch_pipeline.py` can attach foot-track features via `--attach-foot-track-features` and reports automatic/manual-calibrated foot-track coverage.
 - `train_release_contact_classifier.py` now evaluates feature modes per target and stores selected target-specific modes in the model artifact.
+- `train_release_contact_classifier.py` includes automatic `foot_track_*` features but excludes label-derived `manual_foot_*` calibration fields from automatic model inputs.
 - `train_release_contact_classifier.py` now evaluates bounded model families per target (`logistic_regression`, `ridge_classifier`, `linear_svc`, `extra_trees`, `gradient_boosting`) and stores the selected family in the model artifact.
 - `train_release_contact_classifier.py` now reports diagnostic temporal smoothing for side sequences; it improves held-out side accuracy but remains unpromoted until the 0.85 gate clears.
 - `train_release_contact_classifier.py` now reports selective accuracy by prediction confidence, so abstention claims are measurable.
