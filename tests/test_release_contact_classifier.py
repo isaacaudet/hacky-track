@@ -78,6 +78,32 @@ class ReleaseContactClassifierTests(unittest.TestCase):
         self.assertTrue(any("no usable ball-to-body distance" in reason for reason in summary["reasons"]))
         self.assertFalse(any("pose/body proximity columns are missing" in reason for reason in summary["reasons"]))
 
+    def test_readiness_counts_successful_visual_and_embedding_features(self) -> None:
+        rows = [
+            {
+                "video_id": "a",
+                "contact_type": "left_kick",
+                "contact_side": "left",
+                "pose_nearest_foot_dist_px": 12.0,
+                "visual_crop_feature_status": "ok",
+                "vision_embedding_present": True,
+            },
+            {
+                "video_id": "b",
+                "contact_type": "right_kick",
+                "contact_side": "right",
+                "pose_nearest_foot_dist_px": 14.0,
+                "visual_crop_feature_status": "missing_ball",
+                "vision_embedding_present": False,
+                "vision_embedding_000": 0.0,
+            },
+        ]
+
+        summary = contact.readiness_summary(rows, [], min_examples=2, min_videos=2)
+
+        self.assertEqual(summary["rows_with_visual_crop_features"], 1)
+        self.assertEqual(summary["rows_with_vision_embedding_features"], 1)
+
     def test_matches_event_file_contact_labels_to_candidate_rows(self) -> None:
         rows = [
             {
@@ -412,6 +438,63 @@ class ReleaseContactClassifierTests(unittest.TestCase):
         self.assertNotIn("visual_ball_x_norm", features)
         self.assertNotIn("vision_embedding_000", features)
         self.assertNotIn("vision_embedding_feature_status", features)
+
+    def test_release_class_coverage_flags_missing_contact_type_classes(self) -> None:
+        coverage = contact.release_class_coverage(
+            {"kick": 25, "stall": 7},
+            "contact_type",
+            min_examples_per_class=20,
+        )
+
+        self.assertFalse(coverage["passes"])
+        self.assertEqual(
+            coverage["class_counts"],
+            {"kick": 25, "stall": 7, "knee": 0, "drop_floor": 0},
+        )
+        self.assertIn("`knee` labels", " ".join(coverage["blockers"]))
+        self.assertIn("`drop_floor` labels", " ".join(coverage["blockers"]))
+
+    def test_contact_type_accuracy_pass_can_still_fail_release_scope_on_class_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            rows = []
+            for video_id in ("video-a", "video-b", "video-c"):
+                rows.extend(
+                    [
+                        {
+                            "video_id": video_id,
+                            "candidate_time_sec": 1.0,
+                            "contact_type": "kick",
+                            "pose_nearest_lower_part": "left_big_toe",
+                            "pose_nearest_foot_dist_px": 8.0,
+                            "trajectory_impulse_score": 10.0,
+                        },
+                        {
+                            "video_id": video_id,
+                            "candidate_time_sec": 2.0,
+                            "contact_type": "stall",
+                            "pose_nearest_lower_part": "left_big_toe",
+                            "pose_nearest_foot_dist_px": 8.0,
+                            "trajectory_impulse_score": 1.0,
+                            "in_stall_window": True,
+                        },
+                    ]
+                )
+
+            result = contact.train_contact_models(
+                rows,
+                out_dir=out_dir,
+                min_examples=2,
+                min_videos=2,
+                targets=("contact_type",),
+            )
+
+            target = result["targets"]["contact_type"]
+            self.assertEqual(target["gate"], "pass")
+            self.assertEqual(target["release_scope_gate"], "fail")
+            blockers = " ".join(target["release_scope_blockers"])
+            self.assertIn("`knee` labels", blockers)
+            self.assertIn("`drop_floor` labels", blockers)
 
     def test_selective_accuracy_reports_coverage_and_accuracy(self) -> None:
         rows = [

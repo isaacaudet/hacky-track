@@ -187,7 +187,7 @@ python3 -m unittest discover tests
 Result:
 
 ```text
-260/260 tests pass
+263/263 tests pass
 ```
 
 ## Release Decision

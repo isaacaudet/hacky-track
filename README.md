@@ -152,7 +152,7 @@ Current v1.0 contact-intelligence status is intentionally split:
 | touch timing | release-candidate, merged event-level gates pass with the complete OWLv2 detection cache set |
 | HUD touch sparks | release-candidate, OWLv2/L2 anchors, no HSV fallback |
 | reviewed contact badges | manual/label-backed HUD display only |
-| contact type | candidate, passes only on a narrow kick/stall-heavy subset |
+| contact type | candidate, raw kick/stall accuracy passes but release-scope fails without enough stall/knee/drop labels |
 | left/right side | candidate, below release gate |
 | inner/outer surface | candidate, below release gate |
 

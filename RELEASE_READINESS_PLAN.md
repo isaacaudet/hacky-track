@@ -45,14 +45,14 @@ v0.1 touch timing is release-ready:
 - Visual-corrected frozen HUD set passes video/audio/nonblank checks.
 - Frozen-test visual-corrected HUD analytics: precision `1.000`, recall `0.993`, F1 `0.996`, false positives `0`, missed touches `1`.
 - One-command release workflow writes `runs/release-27-public/touch_release_v0_1/touch_release_readiness.md` with status `release_ready_v0_1`.
-- Full test suite passes: `260/260` in the latest verification pass.
+- Full test suite passes: `263/263` in the latest verification pass.
 
 Current non-goal status:
 
 - Contact classifier is trainable, but not v1.0-ready.
 - Pose/body proximity rows are attached and usable as soft features, but coverage is partial and CPU attachment is slow.
-- Reviewed contact labels now exist: 84 type rows, 78 side rows, and 25 surface rows.
-- Current clip-disjoint gates: type passes on a kick/stall-heavy subset, but side and inner/outer surface fail.
+- Reviewed contact labels now exist: 82 matched type rows, 76 side rows, and 25 surface rows.
+- Current clip-disjoint gates: raw contact type accuracy passes on a kick/stall-heavy subset, release-scope still fails due missing stall/knee/drop coverage, and side plus inner/outer surface fail.
 - Stall/drop badges are label-backed display events only.
 
 ## v0.1 Blockers And Evidence

@@ -27,6 +27,7 @@ DEFAULT_LABELS_DIR = DEFAULT_CORPUS / "visual_touch_labels"
 DEFAULT_OUT_DIR = DEFAULT_CORPUS / "release_contact_classifier_v1"
 DEFAULT_MIN_EXAMPLES = 20
 DEFAULT_MIN_VIDEOS = 3
+CONTACT_CLASS_MIN_EXAMPLES = 20
 
 POSE_FEATURES = [
     "pose_nearest_foot_conf",
@@ -156,6 +157,11 @@ AUTO_FEATURE_PREFIXES = (
 )
 CONTACT_TARGETS = ("contact_type", "contact_side", "contact_surface")
 CONTACT_GATE_ACCURACY = 0.85
+CONTACT_RELEASE_CLASSES = {
+    "contact_type": ("kick", "stall", "knee", "drop_floor"),
+    "contact_side": ("left", "right"),
+    "contact_surface": ("inner", "outer"),
+}
 CONTACT_FEATURE_MODES = {
     "all_features": (),
     "no_visual_crop": ("visual_",),
@@ -303,6 +309,33 @@ def pose_columns_attached(row: dict[str, Any]) -> bool:
     return any(key in row for key in POSE_ATTACHMENT_KEYS)
 
 
+def visual_crop_feature_present(row: dict[str, Any]) -> bool:
+    return str(row.get("visual_crop_feature_status") or "") == "ok"
+
+
+def vision_embedding_feature_present(row: dict[str, Any]) -> bool:
+    return bool(row.get("vision_embedding_present"))
+
+
+def release_class_coverage(label_counts: Counter[str], label_key: str, *, min_examples_per_class: int = CONTACT_CLASS_MIN_EXAMPLES) -> dict[str, Any] | None:
+    release_classes = CONTACT_RELEASE_CLASSES.get(label_key)
+    if not release_classes:
+        return None
+    class_counts = {klass: int(label_counts.get(klass, 0)) for klass in release_classes}
+    blockers = [
+        f"need at least {min_examples_per_class} `{klass}` labels, found {count}"
+        for klass, count in class_counts.items()
+        if count < min_examples_per_class
+    ]
+    return {
+        "release_classes": list(release_classes),
+        "min_examples_per_class": min_examples_per_class,
+        "class_counts": class_counts,
+        "passes": not blockers,
+        "blockers": blockers,
+    }
+
+
 def video_match_keys(row: dict[str, Any]) -> set[str]:
     keys: set[str] = set()
     for key in ("video_id", "video_name", "source_video"):
@@ -433,6 +466,8 @@ def readiness_summary(rows: list[dict[str, Any]], label_examples: list[dict[str,
     pose_attached_rows = sum(1 for row in rows if pose_columns_attached(row))
     pose_present_rows = sum(1 for row in rows if row.get("pose_present"))
     pose_rows = sum(1 for row in rows if pose_feature_present(row))
+    visual_crop_rows = sum(1 for row in rows if visual_crop_feature_present(row))
+    vision_embedding_rows = sum(1 for row in rows if vision_embedding_feature_present(row))
     labeled_rows = rows_with_contact_labels(rows)
     label_counts = Counter(row.get("contact_type") for row in labeled_rows if row.get("contact_type"))
     side_counts = Counter(row.get("contact_side") for row in labeled_rows if row.get("contact_side"))
@@ -460,6 +495,8 @@ def readiness_summary(rows: list[dict[str, Any]], label_examples: list[dict[str,
         "rows_with_pose_columns": pose_attached_rows,
         "rows_with_pose_present": pose_present_rows,
         "rows_with_pose_features": pose_rows,
+        "rows_with_visual_crop_features": visual_crop_rows,
+        "rows_with_vision_embedding_features": vision_embedding_rows,
         "rows_with_contact_labels": len(labeled_rows),
         "videos_with_contact_labels": videos_with_labels,
         "contact_type_counts_in_rows": dict(label_counts),
@@ -692,6 +729,9 @@ def train_single_contact_target(
     final_model.fit([contact_feature_dict(row, disabled_prefixes=disabled_prefixes) for row in labeled], labels)
     gate = "pass" if accuracy >= CONTACT_GATE_ACCURACY else "fail"
     gate_blockers: list[str] = []
+    class_coverage = release_class_coverage(label_counts, label_key)
+    release_scope_gate = "pass" if gate == "pass" and (class_coverage is None or class_coverage["passes"]) else "fail"
+    release_scope_blockers = list((class_coverage or {}).get("blockers") or [])
     side_basis_counts: dict[str, int] | None = None
     explicit_wearer_limb_rows: int | None = None
     if label_key == "contact_side":
@@ -707,6 +747,13 @@ def train_single_contact_target(
             gate_blockers.append(
                 f"need at least {min_examples} explicit wearer_limb side labels, found {explicit_wearer_limb_rows}; legacy_unspecified side labels are analysis-only"
             )
+            release_scope_gate = "fail"
+            release_scope_blockers.append(gate_blockers[-1])
+    if gate != "pass":
+        release_scope_gate = "fail"
+        accuracy_blocker = f"accuracy gate failed: {accuracy:.3f} < {CONTACT_GATE_ACCURACY:.2f}"
+        if accuracy_blocker not in release_scope_blockers:
+            release_scope_blockers.insert(0, accuracy_blocker)
     result = {
         "status": "trained",
         "feature_mode": feature_mode,
@@ -715,6 +762,9 @@ def train_single_contact_target(
         "gate": gate,
         "gate_blockers": gate_blockers,
         "gate_accuracy_threshold": CONTACT_GATE_ACCURACY,
+        "release_scope_gate": release_scope_gate,
+        "release_scope_blockers": release_scope_blockers,
+        "release_class_coverage": class_coverage,
         "accuracy": accuracy,
         "rows": len(predictions),
         "training_rows": len(labeled),
@@ -890,6 +940,8 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
         f"- Rows with pose columns attached: `{summary['rows_with_pose_columns']}`",
         f"- Rows with pose present: `{summary['rows_with_pose_present']}`",
         f"- Rows with usable pose distance features: `{summary['rows_with_pose_features']}`",
+        f"- Rows with visual crop features: `{summary.get('rows_with_visual_crop_features', 0)}`",
+        f"- Rows with vision embedding features: `{summary.get('rows_with_vision_embedding_features', 0)}`",
         f"- Rows with reviewed contact labels: `{summary['rows_with_contact_labels']}`",
         f"- Event-file contact labels matched to rows: `{summary['event_file_label_match']['matched_examples']}` / `{summary['event_file_label_match']['label_examples']}`",
         "",
@@ -935,10 +987,20 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
                 lines.append(f"- Selected model family: `{result.get('selected_model_family') or result.get('model_family')}`")
                 lines.append(f"- Leave-one-video-out accuracy: `{result.get('accuracy'):.3f}`")
                 lines.append(f"- Gate: `{result.get('gate')}` at >= `{result.get('gate_accuracy_threshold')}`")
+                lines.append(f"- Release-scope gate: `{result.get('release_scope_gate')}`")
                 for blocker in result.get("gate_blockers") or []:
                     lines.append(f"- Gate blocker: {blocker}")
+                if result.get("release_scope_blockers"):
+                    for blocker in result["release_scope_blockers"]:
+                        lines.append(f"- Release-scope blocker: {blocker}")
                 if result.get("side_basis_counts"):
                     lines.append(f"- Side basis counts: `{result.get('side_basis_counts')}`")
+                if result.get("release_class_coverage"):
+                    coverage = result["release_class_coverage"]
+                    lines.append(
+                        f"- Release class coverage: `{coverage.get('class_counts')}` "
+                        f"(min `{coverage.get('min_examples_per_class')}` per class)"
+                    )
                 lines.append(f"- Rows: `{result.get('rows')}`")
                 lines.append(f"- Label counts: `{result.get('label_counts')}`")
                 lines.append(f"- Prediction counts: `{result.get('prediction_counts')}`")

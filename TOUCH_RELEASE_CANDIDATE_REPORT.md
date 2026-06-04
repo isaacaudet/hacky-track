@@ -208,8 +208,8 @@ clip-disjoint contact metrics are:
 
 | target | rows | selected model | accuracy | gate |
 | --- | ---: | --- | ---: | --- |
-| contact type | 84 | gradient boosting, no OWLv2 embedding | 0.952 | pass on narrow kick/stall subset |
-| wearer side | 78 | ExtraTrees, no ball-centered visual crop | 0.744 | fail |
+| contact type | 82 | gradient boosting, no visual crop | 0.939 | raw pass; release-scope fail until stall/knee/drop labels reach the floor |
+| wearer side | 76 | ExtraTrees, no ball-centered visual crop | 0.750 | fail |
 | inner/outer surface | 25 | ExtraTrees, no ball-centered visual crop | 0.760 | fail |
 
 The HUD now shows reviewed contact labels as manual badges when a merged touch

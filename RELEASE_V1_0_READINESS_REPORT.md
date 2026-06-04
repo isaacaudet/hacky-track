@@ -42,32 +42,32 @@ Current matched reviewed labels:
 
 | target | rows | classes |
 | --- | ---: | --- |
-| contact type | 84 | kick 77, stall 7 |
-| side | 78 | right 52, left 26; all `wearer_limb` side basis |
+| contact type | 82 | kick 75, stall 7 |
+| side | 76 | right 51, left 25; all `wearer_limb` side basis |
 | surface | 25 | outer 18, inner 7 |
 
 Clip-disjoint leave-one-video-out results:
 
 | target | accuracy | gate | selected feature mode | interpretation |
 | --- | ---: | --- | --- | --- |
-| contact type | 0.952 | pass | no_vision_embedding + gradient boosting | Improved, but still mostly kick-vs-few-stall labels; not enough knee/drop diversity. |
-| side | 0.744 | fail | no_visual_crop + ExtraTrees | Improved from 0.628, but still below the 0.85 side gate. |
+| contact type | 0.939 | raw pass / release-scope fail | no_visual_crop + gradient boosting | Raw kick/stall accuracy passes, but class coverage blocks full v1.0: stall 7, knee 0, drop_floor 0. |
+| side | 0.750 | fail | no_visual_crop + ExtraTrees | Improved from 0.628, but still below the 0.85 side gate. |
 | surface | 0.760 | fail | no_visual_crop + ExtraTrees | Still below gate; inner examples are the dominant misses. |
 
 Feature-mode ablation:
 
 | target | current best | prior logistic baseline | result |
 | --- | ---: | ---: | --- |
-| contact type | 0.952 | 0.917 | Gradient boosting recovers 3 more stall/kick decisions, but label mix is narrow. |
-| side | 0.744 | 0.628 | ExtraTrees beats majority baseline (0.667), but still misses many left contacts. |
-| surface | 0.760 | 0.760 | Model family does not improve the small, imbalanced inner/outer set. |
+| contact type | 0.939 | 0.902 | Gradient boosting is strongest, but release-scope coverage is still missing stall/knee/drop labels. |
+| side | 0.750 | 0.628 | ExtraTrees beats majority baseline (0.671), but still misses many left contacts. |
+| surface | 0.760 | 0.760 | Model family does not clear the small, imbalanced inner/outer set. |
 
 Confidence/abstention does not rescue the failing targets:
 
-- Side stays below gate; the new ExtraTrees model reaches 0.744 full coverage but high-confidence abstention does not rescue it.
+- Side stays below gate; the new ExtraTrees model reaches 0.750 full coverage but high-confidence abstention does not rescue it.
 - All current approved/training side labels are now `wearer_limb`, inferred from the side-specific trick labels you already reviewed.
 - Surface stays below gate; selected model is 0.760 at full coverage and remains below 0.85 under confidence filtering.
-- Contact type is the only target where high-confidence abstention is reliable, but the label mix is still too narrow for full v1.0 claims.
+- Contact type has a raw accuracy pass, but the new release-scope gate correctly keeps it unpromoted until stall/knee/drop_floor class coverage reaches the release floor.
 
 ### Pose / Body Proximity
 
@@ -81,7 +81,7 @@ Current coverage:
 
 | rows | pose present | usable pose distance |
 | ---: | ---: | ---: |
-| 659 | 313 | 259 |
+| 624 | 281 | 259 |
 
 Interpretation:
 
@@ -101,7 +101,7 @@ Current coverage:
 
 | split | rows | ok crop rows |
 | --- | ---: | ---: |
-| train + validation | 318 | 223 |
+| train + validation | 283 | 249 |
 | frozen test | 341 | 277 |
 
 Interpretation:
@@ -122,14 +122,14 @@ Current reviewed-contact coverage:
 
 | split | requested | ok embeddings |
 | --- | ---: | ---: |
-| train + validation | 19 | 19 |
+| train + validation | 17 | 17 |
 | frozen test | 65 | 65 |
 
 Interpretation:
 
 - Reusing OWLv2 as a frozen crop encoder is technically viable and fully cached for reviewed contact labels.
 - It is slow on MPS and should remain an explicit v1.0 prep step, not default release processing.
-- It improves inner/outer surface accuracy from 0.640 to 0.760, but still misses the 0.85 gate.
+- Visual features improve inner/outer surface accuracy from 0.640 to 0.760, but still miss the 0.85 gate.
 - It does not solve side; side remains a label/semantics/egocentric-foot-identity problem.
 
 ### Contact Error Audit
@@ -144,10 +144,10 @@ Current error buckets:
 
 | bucket | count | meaning |
 | --- | ---: | --- |
-| pose_missing | 5 | Pose unavailable at contact time. |
+| pose_missing | 7 | Pose unavailable at contact time. |
 | pose_side_disagreement | 6 | Pose side conflicts with the reviewed side. |
-| side_visual_ambiguity | 9 | Image crop/embedding still cannot infer side reliably. |
-| type_motion_ambiguity | 3 | Mostly stall/kick errors; needs dwell/control features and more stall labels. |
+| side_visual_ambiguity | 6 | Image crop/embedding still cannot infer side reliably. |
+| type_motion_ambiguity | 4 | Mostly stall/kick errors; needs dwell/control features and more stall labels. |
 | surface_label_or_geometry_ambiguity | 4 | Inner/outer needs more labels despite embedding gains. |
 | pose_surface_disagreement | 2 | Pose foot-edge geometry conflicts with reviewed surface. |
 | stall_window_confusion | 1 | Stall context feature is still weak. |
@@ -177,11 +177,11 @@ Global mapping scores:
 
 | predictor | covered | coverage | accuracy |
 | --- | ---: | ---: | ---: |
-| pose anatomical | 50 | 0.641 | 0.540 |
-| pose flipped | 50 | 0.641 | 0.460 |
-| screen ball | 78 | 1.000 | 0.551 |
-| screen ball flipped | 78 | 1.000 | 0.449 |
-| screen ball, 0.08 center deadzone | 15 | 0.192 | 0.733 |
+| pose anatomical | 50 | 0.658 | 0.540 |
+| pose flipped | 50 | 0.658 | 0.460 |
+| screen ball | 76 | 1.000 | 0.553 |
+| screen ball flipped | 76 | 1.000 | 0.447 |
+| screen ball, 0.08 center deadzone | 15 | 0.197 | 0.733 |
 
 Interpretation:
 
@@ -233,6 +233,7 @@ Code changes:
 - `train_release_contact_classifier.py` now evaluates feature modes per target and stores selected target-specific modes in the model artifact.
 - `train_release_contact_classifier.py` now evaluates bounded model families per target (`logistic_regression`, `extra_trees`, `gradient_boosting`) and stores the selected family in the model artifact.
 - `train_release_contact_classifier.py` now reports selective accuracy by prediction confidence, so abstention claims are measurable.
+- `train_release_contact_classifier.py` now separates raw accuracy gates from release-scope gates, so kick/stall accuracy cannot be promoted as full kick/knee/stall/drop intelligence until class coverage exists.
 - `contact_error_audit.py` renders visual strips for current contact classifier errors, clears stale strips before rendering, and buckets failures by likely mode.
 - `render_touch_release_hud.py` now attaches reviewed contact labels to matched merged touch events as manual HUD badges, with provenance and match deltas.
 - `render_touch_release_hud.py` and `hackytrack.py touch-release` now accept multiple OWLv2 detection JSONLs, so supplemental contact-missing caches are not silently dropped.
@@ -271,7 +272,7 @@ python3 -m unittest discover tests
 Current result:
 
 ```text
-Ran 260 tests in 6.280s
+Ran 263 tests in 7.793s
 OK
 ```
 
@@ -303,9 +304,9 @@ Do not render these as product facts until the gate passes.
 
 | signal | minimum labels | release gate | current state |
 | --- | ---: | --- | --- |
-| left/right side | >=20 explicit wearer-limb labels per promoted class, >=3 videos | >=85% clip-disjoint side accuracy | 78 wearer-limb rows, 0.744 accuracy, fail |
+| left/right side | >=20 explicit wearer-limb labels per promoted class, >=3 videos | >=85% clip-disjoint side accuracy | 76 wearer-limb rows, 0.750 accuracy, fail |
 | inner/outer surface | >=20 per promoted class, >=3 videos | >=85% clip-disjoint surface accuracy | 25 rows, 0.760 accuracy, fail |
-| contact type: kick/knee/stall/drop | >=20 per promoted class, >=3 videos | >=85% contact-type accuracy | 84 rows, 0.952 accuracy, pass only for kick/stall-heavy subset |
+| contact type: kick/knee/stall/drop | >=20 per promoted class, >=3 videos | >=85% contact-type accuracy | 82 rows, 0.939 raw accuracy, release-scope fail: stall 7, knee 0, drop_floor 0 |
 | drop/floor reset | enough reviewed positives and negatives across clips | precision >=90%, recall >=90% | not promoted in OWLv2 release path |
 | stall | enough reviewed stall windows and non-stall controls | precision >=85%, recall >=80% | 7 labels, not enough for standalone gate |
 | tricks | >=20 examples per promoted trick | >=80% held-out precision | not ready |
