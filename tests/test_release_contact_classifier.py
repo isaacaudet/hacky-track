@@ -439,6 +439,24 @@ class ReleaseContactClassifierTests(unittest.TestCase):
         self.assertNotIn("vision_embedding_000", features)
         self.assertNotIn("vision_embedding_feature_status", features)
 
+    def test_ridge_classifier_is_available_as_bounded_contact_model_family(self) -> None:
+        model = contact.build_model("ridge_classifier")
+
+        self.assertIn("ridge_classifier", contact.CONTACT_MODEL_FAMILIES)
+        self.assertIsNotNone(model)
+
+    def test_ridge_classifier_confidence_uses_decision_margin(self) -> None:
+        model = contact.build_model("ridge_classifier")
+        features = [{"x": -2.0}, {"x": -1.0}, {"x": 1.0}, {"x": 2.0}]
+        labels = ["left", "left", "right", "right"]
+        model.fit(features, labels)
+
+        confidences = contact.prediction_confidences(model, features)
+
+        self.assertEqual(len(confidences), len(features))
+        self.assertTrue(all(0.5 < confidence < 1.0 for confidence in confidences))
+        self.assertGreater(len({round(confidence, 4) for confidence in confidences}), 1)
+
     def test_release_class_coverage_flags_missing_contact_type_classes(self) -> None:
         coverage = contact.release_class_coverage(
             {"kick": 25, "stall": 7},

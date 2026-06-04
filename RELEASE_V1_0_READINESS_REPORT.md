@@ -50,7 +50,7 @@ Clip-disjoint leave-one-video-out results:
 
 | target | accuracy | gate | selected feature mode | interpretation |
 | --- | ---: | --- | --- | --- |
-| contact type | 0.939 | raw pass / release-scope fail | no_visual_crop + gradient boosting | Raw kick/stall accuracy passes, but class coverage blocks full v1.0: stall 7, knee 0, drop_floor 0. |
+| contact type | 0.951 | raw pass / release-scope fail | no_visual_crop + ridge classifier | Raw kick/stall accuracy passes, but class coverage blocks full v1.0: stall 7, knee 0, drop_floor 0. |
 | side | 0.750 | fail | no_visual_crop + ExtraTrees | Improved from 0.628, but still below the 0.85 side gate. |
 | surface | 0.760 | fail | no_visual_crop + ExtraTrees | Still below gate; inner examples are the dominant misses. |
 
@@ -58,7 +58,7 @@ Feature-mode ablation:
 
 | target | current best | prior logistic baseline | result |
 | --- | ---: | ---: | --- |
-| contact type | 0.939 | 0.902 | Gradient boosting is strongest, but release-scope coverage is still missing stall/knee/drop labels. |
+| contact type | 0.951 | 0.902 | Ridge classifier is strongest on the current kick/stall set, but release-scope coverage is still missing stall/knee/drop labels. |
 | side | 0.750 | 0.628 | ExtraTrees beats majority baseline (0.671), but still misses many left contacts. |
 | surface | 0.760 | 0.760 | Model family does not clear the small, imbalanced inner/outer set. |
 
@@ -150,7 +150,6 @@ Current error buckets:
 | type_motion_ambiguity | 4 | Mostly stall/kick errors; needs dwell/control features and more stall labels. |
 | surface_label_or_geometry_ambiguity | 4 | Inner/outer needs more labels despite embedding gains. |
 | pose_surface_disagreement | 2 | Pose foot-edge geometry conflicts with reviewed surface. |
-| stall_window_confusion | 1 | Stall context feature is still weak. |
 
 Representative strips are rendered under:
 
@@ -272,7 +271,7 @@ python3 -m unittest discover tests
 Current result:
 
 ```text
-Ran 263 tests in 7.793s
+Ran 272 tests in 7.730s
 OK
 ```
 
@@ -306,7 +305,7 @@ Do not render these as product facts until the gate passes.
 | --- | ---: | --- | --- |
 | left/right side | >=20 explicit wearer-limb labels per promoted class, >=3 videos | >=85% clip-disjoint side accuracy | 76 wearer-limb rows, 0.750 accuracy, fail |
 | inner/outer surface | >=20 per promoted class, >=3 videos | >=85% clip-disjoint surface accuracy | 25 rows, 0.760 accuracy, fail |
-| contact type: kick/knee/stall/drop | >=20 per promoted class, >=3 videos | >=85% contact-type accuracy | 82 rows, 0.939 raw accuracy, release-scope fail: stall 7, knee 0, drop_floor 0 |
+| contact type: kick/knee/stall/drop | >=20 per promoted class, >=3 videos | >=85% contact-type accuracy | 82 rows, 0.951 raw accuracy, release-scope fail: stall 7, knee 0, drop_floor 0 |
 | drop/floor reset | enough reviewed positives and negatives across clips | precision >=90%, recall >=90% | 35 clean reviewed reset rows, 0.682 P / 0.714 R after rally-sequence reset features, fail |
 | stall | enough reviewed stall windows and non-stall controls | precision >=85%, recall >=80% | 32 clean reviewed stall candidates, but only 3 approved stalls, not-ready |
 | tricks | >=20 examples per promoted trick | >=80% held-out precision | not ready |

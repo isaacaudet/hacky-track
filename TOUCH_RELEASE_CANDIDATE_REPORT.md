@@ -208,7 +208,7 @@ clip-disjoint contact metrics are:
 
 | target | rows | selected model | accuracy | gate |
 | --- | ---: | --- | ---: | --- |
-| contact type | 82 | gradient boosting, no visual crop | 0.939 | raw pass; release-scope fail until stall/knee/drop labels reach the floor |
+| contact type | 82 | ridge classifier, no visual crop | 0.951 | raw pass; release-scope fail until stall/knee/drop labels reach the floor |
 | wearer side | 76 | ExtraTrees, no ball-centered visual crop | 0.750 | fail |
 | inner/outer surface | 25 | ExtraTrees, no ball-centered visual crop | 0.760 | fail |
 | drop/floor reset | 35 | ExtraTrees over OWLv2/L2 + floor/context + merged-touch gap features | 0.682 P / 0.714 R | fail |
@@ -329,7 +329,7 @@ python3 -m unittest \
   tests.test_release_event_error_audit
 ```
 
-Current result: `260` tests pass.
+Current result: `272` tests pass.
 
 ## Remaining Risks
 

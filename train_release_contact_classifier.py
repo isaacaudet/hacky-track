@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -168,7 +169,7 @@ CONTACT_FEATURE_MODES = {
     "no_vision_embedding": ("vision_",),
     "no_visual_features": ("visual_", "vision_"),
 }
-CONTACT_MODEL_FAMILIES = ("logistic_regression", "extra_trees", "gradient_boosting")
+CONTACT_MODEL_FAMILIES = ("logistic_regression", "ridge_classifier", "extra_trees", "gradient_boosting")
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -582,7 +583,7 @@ def contact_feature_dict(row: dict[str, Any], *, disabled_prefixes: tuple[str, .
 def build_model(model_family: str = "logistic_regression"):
     from sklearn.feature_extraction import DictVectorizer
     from sklearn.ensemble import ExtraTreesClassifier, GradientBoostingClassifier
-    from sklearn.linear_model import LogisticRegression
+    from sklearn.linear_model import LogisticRegression, RidgeClassifier
     from sklearn.pipeline import make_pipeline
     from sklearn.preprocessing import StandardScaler
 
@@ -591,6 +592,12 @@ def build_model(model_family: str = "logistic_regression"):
             DictVectorizer(sparse=True),
             StandardScaler(with_mean=False),
             LogisticRegression(class_weight="balanced", max_iter=2000, random_state=11),
+        )
+    if model_family == "ridge_classifier":
+        return make_pipeline(
+            DictVectorizer(sparse=True),
+            StandardScaler(with_mean=False),
+            RidgeClassifier(class_weight="balanced"),
         )
     if model_family == "extra_trees":
         return make_pipeline(
@@ -603,6 +610,36 @@ def build_model(model_family: str = "logistic_regression"):
             GradientBoostingClassifier(max_depth=2, n_estimators=40, random_state=11),
         )
     raise ValueError(f"unknown contact model family: {model_family}")
+
+
+def prediction_confidences(model: Any, features: list[dict[str, Any]]) -> list[float]:
+    if not features:
+        return []
+    if hasattr(model, "predict_proba"):
+        probabilities = model.predict_proba(features)
+        return [float(max(row)) for row in probabilities]
+    if hasattr(model, "decision_function"):
+        scores = model.decision_function(features)
+        margins: list[float] = []
+        for row in scores:
+            if isinstance(row, (list, tuple)):
+                values = [float(value) for value in row]
+            elif hasattr(row, "tolist"):
+                listed = row.tolist()
+                values = [float(value) for value in listed] if isinstance(listed, list) else [float(listed)]
+            else:
+                values = [float(row)]
+            if len(values) == 1:
+                margins.append(abs(values[0]))
+            else:
+                sorted_values = sorted(values)
+                margins.append(sorted_values[-1] - sorted_values[-2])
+        positive = [margin for margin in margins if margin > 0]
+        scale = sorted(positive)[len(positive) // 2] if positive else 1.0
+        if scale <= 0:
+            scale = 1.0
+        return [float(1.0 / (1.0 + math.exp(-(margin / scale)))) for margin in margins]
+    return [1.0 for _ in features]
 
 
 def rows_for_target(rows: list[dict[str, Any]], label_key: str) -> list[dict[str, Any]]:
@@ -680,14 +717,12 @@ def train_single_contact_target(
             skipped_folds.append({"video_id": video_id, "rows": len(test), "reason": "training fold has one class"})
             continue
         model = build_model(model_family)
-        model.fit([contact_feature_dict(row, disabled_prefixes=disabled_prefixes) for row in train], train_labels)
+        train_features = [contact_feature_dict(row, disabled_prefixes=disabled_prefixes) for row in train]
+        test_features = [contact_feature_dict(row, disabled_prefixes=disabled_prefixes) for row in test]
+        model.fit(train_features, train_labels)
         test_labels = [str(row[label_key]) for row in test]
-        fold_preds = [str(value) for value in model.predict([contact_feature_dict(row, disabled_prefixes=disabled_prefixes) for row in test])]
-        if hasattr(model, "predict_proba"):
-            probabilities = model.predict_proba([contact_feature_dict(row, disabled_prefixes=disabled_prefixes) for row in test])
-            fold_confidences = [float(max(row)) for row in probabilities]
-        else:
-            fold_confidences = [1.0 for _ in fold_preds]
+        fold_preds = [str(value) for value in model.predict(test_features)]
+        fold_confidences = prediction_confidences(model, test_features)
         fold_correct = sum(1 for label, pred in zip(test_labels, fold_preds) if label == pred)
         folds.append(
             {
@@ -827,6 +862,7 @@ def train_single_contact_target_best_mode(
         }.get(feature_mode, 0)
         model_preference = {
             "logistic_regression": 2,
+            "ridge_classifier": 2,
             "extra_trees": 1,
             "gradient_boosting": 0,
         }.get(model_family, 0)
