@@ -242,6 +242,17 @@ stream coverage from 20 to 27 videos, but automatic drop worsens from
 model-only touch streams out of product decisions until a later held-out
 ablation proves lift.
 
+Side sequence-smoothing audit artifacts:
+
+```text
+runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/contact_error_audit/contact_side_sequence_smoothed_error_audit.jsonl
+runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/contact_error_audit/sequence_smoothed_strips/
+```
+
+The smoothed-side audit leaves 14 held-out failures: 5 pose-side disagreements,
+6 visual-ambiguity cases, and 3 pose-missing cases. This is why the side layer
+stays diagnostic-only.
+
 Supplemental detection-cache smoke check:
 
 ```bash

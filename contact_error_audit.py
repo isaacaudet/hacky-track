@@ -205,7 +205,82 @@ def build_error_rows(
     return errors
 
 
-def write_report(path: Path, summary: dict[str, Any], errors: list[dict[str, Any]]) -> None:
+def build_side_sequence_error_rows(
+    labeled_rows: list[dict[str, Any]],
+    *,
+    min_examples: int,
+    min_videos: int,
+) -> list[dict[str, Any]]:
+    by_key = {row_lookup_key(row): row for row in labeled_rows}
+    result, _model = contact.train_single_contact_target(
+        labeled_rows,
+        "contact_side",
+        min_examples=min_examples,
+        min_videos=min_videos,
+        feature_mode="no_visual_features",
+        disabled_prefixes=contact.CONTACT_FEATURE_MODES["no_visual_features"],
+        model_family="linear_svc",
+    )
+    smoothed = result.get("sequence_smoothed") or {}
+    errors: list[dict[str, Any]] = []
+    for error in smoothed.get("errors") or []:
+        key = (str(error.get("video_id")), round(float(error.get("candidate_time_sec") or 0.0), 6))
+        row = by_key.get(key)
+        if row is None:
+            continue
+        bucket = infer_failure_bucket("contact_side", row, str(error.get("label")), str(error.get("prediction")))
+        errors.append(
+            {
+                **error,
+                "target": "contact_side_sequence_smoothed",
+                "selected_feature_mode": "no_visual_features",
+                "failure_bucket": bucket,
+                "video_name": row.get("video_name"),
+                "split": row.get("split"),
+                "pose_geometry_nearest_side": row.get("pose_geometry_nearest_side"),
+                "pose_geometry_nearest_surface": row.get("pose_geometry_nearest_surface"),
+                "pose_nearest_lower_part": row.get("pose_nearest_lower_part"),
+                "visual_crop_feature_status": row.get("visual_crop_feature_status"),
+            }
+        )
+    return errors
+
+
+def render_errors(
+    *,
+    errors: list[dict[str, Any]],
+    labeled_rows: list[dict[str, Any]],
+    video_paths: dict[str, Path],
+    strip_dir: Path,
+    strip_panel_width_px: int,
+) -> None:
+    for index, error in enumerate(errors):
+        video_name = str(error.get("video_name") or "")
+        video_path = video_paths.get(video_name)
+        if video_path is None:
+            error["strip_status"] = "missing_video_path"
+            continue
+        safe_video = str(error.get("video_id") or "video").replace("/", "-")
+        strip_path = strip_dir / f"{index:03d}_{error['target']}_{safe_video}_{float(error.get('candidate_time_sec') or 0):.3f}.jpg"
+        matching_row = next(
+            row for row in labeled_rows
+            if row_lookup_key(row) == (str(error.get("video_id")), round(float(error.get("candidate_time_sec") or 0.0), 6))
+        )
+        ok = render_error_strip(
+            row=matching_row,
+            target=str(error["target"]),
+            label=str(error["label"]),
+            prediction=str(error["prediction"]),
+            video_path=video_path,
+            out_path=strip_path,
+            width_px=strip_panel_width_px,
+        )
+        error["strip_status"] = "ok" if ok else "render_failed"
+        if ok:
+            error["strip_path"] = str(strip_path)
+
+
+def write_report(path: Path, summary: dict[str, Any], errors: list[dict[str, Any]], sequence_errors: list[dict[str, Any]]) -> None:
     by_target = Counter(row["target"] for row in errors)
     by_bucket = Counter(row["failure_bucket"] for row in errors)
     lines = [
@@ -232,6 +307,29 @@ def write_report(path: Path, summary: dict[str, Any], errors: list[dict[str, Any
             f"| {row['target']} | `{row.get('video_id')}` | {float(row.get('candidate_time_sec') or 0):.3f} | "
             f"{row.get('label')} | {row.get('prediction')} | {row.get('failure_bucket')} | {strip_cell} |"
         )
+    if sequence_errors:
+        sequence_by_bucket = Counter(row["failure_bucket"] for row in sequence_errors)
+        lines.extend(
+            [
+                "",
+                "## Sequence-Smoothed Side Errors",
+                "",
+                "- Status: `diagnostic_only`; these are not automatic HUD side badges.",
+                f"- Errors: `{len(sequence_errors)}`",
+                f"- By failure bucket: `{dict(sequence_by_bucket)}`",
+                "",
+                "| video | time | label | smoothed pred | raw pred | bucket | strip |",
+                "| --- | ---: | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for row in sequence_errors:
+            strip = row.get("strip_path")
+            strip_cell = f"[open]({strip})" if strip else ""
+            lines.append(
+                f"| `{row.get('video_id')}` | {float(row.get('candidate_time_sec') or 0):.3f} | "
+                f"{row.get('label')} | {row.get('prediction')} | {row.get('raw_prediction')} | "
+                f"{row.get('failure_bucket')} | {strip_cell} |"
+            )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -239,32 +337,31 @@ def write_report(path: Path, summary: dict[str, Any], errors: list[dict[str, Any
 def run_audit(args: argparse.Namespace) -> dict[str, Any]:
     out_dir = args.out_dir.resolve()
     strip_dir = out_dir / "strips"
+    sequence_strip_dir = out_dir / "sequence_smoothed_strips"
     if strip_dir.exists():
         for stale_path in strip_dir.glob("*.jpg"):
             stale_path.unlink()
+    if sequence_strip_dir.exists():
+        for stale_path in sequence_strip_dir.glob("*.jpg"):
+            stale_path.unlink()
     labeled_rows = load_labeled_rows(args.dataset_dir.resolve(), args.labels_dir.resolve(), args.label_match_tolerance_sec)
     errors = build_error_rows(labeled_rows, min_examples=args.min_examples, min_videos=args.min_videos)
+    sequence_errors = build_side_sequence_error_rows(labeled_rows, min_examples=args.min_examples, min_videos=args.min_videos)
     video_paths = video_paths_by_name(args.review_manifest.resolve())
-    for index, error in enumerate(errors):
-        video_name = str(error.get("video_name") or "")
-        video_path = video_paths.get(video_name)
-        if video_path is None:
-            error["strip_status"] = "missing_video_path"
-            continue
-        safe_video = str(error.get("video_id") or "video").replace("/", "-")
-        strip_path = strip_dir / f"{index:03d}_{error['target']}_{safe_video}_{float(error.get('candidate_time_sec') or 0):.3f}.jpg"
-        ok = render_error_strip(
-            row=next(row for row in labeled_rows if row_lookup_key(row) == (str(error.get("video_id")), round(float(error.get("candidate_time_sec") or 0.0), 6))),
-            target=str(error["target"]),
-            label=str(error["label"]),
-            prediction=str(error["prediction"]),
-            video_path=video_path,
-            out_path=strip_path,
-            width_px=args.strip_panel_width_px,
-        )
-        error["strip_status"] = "ok" if ok else "render_failed"
-        if ok:
-            error["strip_path"] = str(strip_path)
+    render_errors(
+        errors=errors,
+        labeled_rows=labeled_rows,
+        video_paths=video_paths,
+        strip_dir=strip_dir,
+        strip_panel_width_px=args.strip_panel_width_px,
+    )
+    render_errors(
+        errors=sequence_errors,
+        labeled_rows=labeled_rows,
+        video_paths=video_paths,
+        strip_dir=sequence_strip_dir,
+        strip_panel_width_px=args.strip_panel_width_px,
+    )
     summary = {
         "schema_version": 1,
         "status": "complete",
@@ -273,13 +370,17 @@ def run_audit(args: argparse.Namespace) -> dict[str, Any]:
         "review_manifest": str(args.review_manifest),
         "out_dir": str(out_dir),
         "strip_dir": str(strip_dir),
+        "sequence_smoothed_strip_dir": str(sequence_strip_dir),
         "errors": len(errors),
         "by_target": dict(Counter(row["target"] for row in errors)),
         "by_failure_bucket": dict(Counter(row["failure_bucket"] for row in errors)),
+        "sequence_smoothed_side_errors": len(sequence_errors),
+        "sequence_smoothed_side_by_failure_bucket": dict(Counter(row["failure_bucket"] for row in sequence_errors)),
     }
     write_json(out_dir / "contact_error_audit_summary.json", summary)
     write_jsonl(out_dir / "contact_error_audit.jsonl", errors)
-    write_report(out_dir / "contact_error_audit_report.md", summary, errors)
+    write_jsonl(out_dir / "contact_side_sequence_smoothed_error_audit.jsonl", sequence_errors)
+    write_report(out_dir / "contact_error_audit_report.md", summary, errors, sequence_errors)
     return summary
 
 
@@ -300,7 +401,19 @@ def main() -> None:
     summary = run_audit(parse_args())
     print(f"status: {summary['status']}")
     print(f"report: {Path(summary['out_dir']) / 'contact_error_audit_report.md'}")
-    print(json.dumps({"errors": summary["errors"], "by_target": summary["by_target"], "by_failure_bucket": summary["by_failure_bucket"]}, indent=2, sort_keys=True))
+    print(
+        json.dumps(
+            {
+                "errors": summary["errors"],
+                "by_target": summary["by_target"],
+                "by_failure_bucket": summary["by_failure_bucket"],
+                "sequence_smoothed_side_errors": summary["sequence_smoothed_side_errors"],
+                "sequence_smoothed_side_by_failure_bucket": summary["sequence_smoothed_side_by_failure_bucket"],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
 
 
 if __name__ == "__main__":

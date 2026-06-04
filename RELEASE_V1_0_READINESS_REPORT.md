@@ -173,6 +173,18 @@ Representative strips are rendered under:
 runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/contact_error_audit/strips/
 ```
 
+Sequence-smoothed side audit:
+
+```text
+runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/contact_error_audit/contact_side_sequence_smoothed_error_audit.jsonl
+runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/contact_error_audit/sequence_smoothed_strips/
+```
+
+Temporal smoothing reduces side errors from 17 to 14. The remaining smoothed
+side failures are still mixed: 5 pose-side disagreements, 6 visual-ambiguity
+cases, and 3 pose-missing cases. That proves smoothing is a useful diagnostic
+feature, but not a sufficient release strategy.
+
 ### Side Semantics Audit
 
 New artifact:
@@ -251,7 +263,7 @@ Code changes:
 - `train_release_contact_classifier.py` now reports selective accuracy by prediction confidence, so abstention claims are measurable.
 - `train_release_contact_classifier.py` now reports balanced accuracy/per-class recall and uses balanced accuracy as a tie-breaker when raw leave-one-video-out accuracy is equal.
 - `train_release_contact_classifier.py` now separates raw accuracy gates from release-scope gates, so kick/stall accuracy cannot be promoted as full kick/knee/stall/drop intelligence until class coverage exists.
-- `contact_error_audit.py` renders visual strips for current contact classifier errors, clears stale strips before rendering, and buckets failures by likely mode.
+- `contact_error_audit.py` renders visual strips for current contact classifier errors and sequence-smoothed side errors, clears stale strips before rendering, and buckets failures by likely mode.
 - `render_touch_release_hud.py` now attaches reviewed contact labels to matched merged touch events as manual HUD badges, with provenance and match deltas.
 - `render_touch_release_hud.py` and `hackytrack.py touch-release` now accept multiple OWLv2 detection JSONLs, so supplemental contact-missing caches are not silently dropped.
 - `run_touch_pipeline.py` now records the actual detection JSONL inputs in the status report and prints a reproducible release command using those inputs.
