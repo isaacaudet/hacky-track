@@ -172,6 +172,13 @@ workflows. The automatic foot-track features are measured in the contact
 classifier ablation, but current side/surface gates still fail, so automatic HUD
 side/surface badges remain unpromoted.
 
+`attach_touch_cotracker_features.py` adds a stronger optional tracking spike:
+RTMW seeds foot landmarks and CoTracker3 tracks them through short local windows.
+On the current contact-labeled corpus it produced 63 usable tracked windows out
+of 82 processed, but clip-disjoint side/surface metrics still did not improve.
+The selected contact models therefore use `no_tracking_features` modes where
+tracking hurts.
+
 The separate model-only touch-stream exporter can fill unreviewed touch context
 for reset/stall experiments:
 
@@ -230,6 +237,7 @@ and badge-rendering checks.
 | `release_event_error_audit.py` | Renders visual strips for remaining merged-event FP/FN cases with frames, ball-track graph, audio, and trajectory cues. |
 | `train_touch_classifier.py` | Trains/evaluates the fused audio + trajectory touch classifier and writes merged event outputs. |
 | `attach_touch_foot_track_features.py` | Adds RTMW-based temporal foot-continuity features plus label-derived manual foot calibration fields for visual-corrected workflows. |
+| `attach_touch_cotracker_features.py` | Adds optional CoTracker3 foot-continuity features seeded from RTMW foot landmarks on short local windows. |
 | `train_release_contact_classifier.py` | Separate readiness/eval gate for left/right/contact-type labels using pose, visual crop, embedding, and foot-track features when labels/features exist. |
 | `detect_atw_overlay.py` | Experimental footbag/foot heuristic for around-the-world detection. |
 

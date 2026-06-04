@@ -597,6 +597,24 @@ class ReleaseContactClassifierTests(unittest.TestCase):
         self.assertNotIn("visual_ball_x_norm", features)
         self.assertNotIn("foot_track_nearest_pose_side_confidence", features)
 
+    def test_feature_dict_includes_automatic_cotracker_and_can_disable_tracking_features(self) -> None:
+        row = {
+            "pose_nearest_foot_dist_px": 12.0,
+            "cotracker_nearest_track_side": "left",
+            "cotracker_side_confidence": 0.7,
+            "foot_track_nearest_pose_side_confidence": 0.8,
+        }
+
+        features = contact.contact_feature_dict(row)
+        disabled = contact.contact_feature_dict(row, disabled_prefixes=contact.CONTACT_FEATURE_MODES["no_tracking_features"])
+
+        self.assertEqual(features["cotracker_nearest_track_side"], "left")
+        self.assertEqual(features["cotracker_side_confidence"], 0.7)
+        self.assertNotIn("cotracker_nearest_track_side", disabled)
+        self.assertNotIn("cotracker_side_confidence", disabled)
+        self.assertNotIn("foot_track_nearest_pose_side_confidence", disabled)
+        self.assertIn("pose_nearest_foot_dist_px", disabled)
+
     def test_ridge_classifier_is_available_as_bounded_contact_model_family(self) -> None:
         model = contact.build_model("ridge_classifier")
 

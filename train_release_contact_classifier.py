@@ -153,6 +153,7 @@ AUTO_FEATURE_PREFIXES = (
     "pose_right_",
     "pose_geometry_",
     "foot_track_",
+    "cotracker_",
     "crop_ball_foot_",
     "visual_",
     "vision_",
@@ -166,17 +167,27 @@ CONTACT_RELEASE_CLASSES = {
 }
 CONTACT_FEATURE_MODES = {
     "all_features": (),
+    "no_cotracker": ("cotracker_",),
     "no_foot_track": ("foot_track_",),
+    "no_tracking_features": ("foot_track_", "cotracker_"),
     "no_visual_crop": ("visual_",),
     "no_visual_crop_no_foot_track": ("visual_", "foot_track_"),
+    "no_visual_crop_no_tracking_features": ("visual_", "foot_track_", "cotracker_"),
     "no_vision_embedding": ("vision_",),
     "no_vision_embedding_no_foot_track": ("vision_", "foot_track_"),
+    "no_vision_embedding_no_tracking_features": ("vision_", "foot_track_", "cotracker_"),
     "no_visual_features": ("visual_", "vision_"),
     "no_visual_features_no_foot_track": ("visual_", "vision_", "foot_track_"),
+    "no_visual_features_no_tracking_features": ("visual_", "vision_", "foot_track_", "cotracker_"),
     "pose_only": ("__pose_only__",),
 }
 CONTACT_MODEL_FAMILIES = ("logistic_regression", "ridge_classifier", "linear_svc", "extra_trees", "gradient_boosting")
-LINEAR_SVC_FEATURE_MODES = {"no_visual_features", "no_visual_features_no_foot_track", "pose_only"}
+LINEAR_SVC_FEATURE_MODES = {
+    "no_visual_features",
+    "no_visual_features_no_foot_track",
+    "no_visual_features_no_tracking_features",
+    "pose_only",
+}
 CONTACT_SIDE_SEQUENCE_STATES = ("left", "right")
 CONTACT_SIDE_SEQUENCE_SMOOTHING = {
     "alpha": 1.0,
@@ -1199,11 +1210,16 @@ def train_single_contact_target_best_mode(
         feature_mode = str(result.get("feature_mode") or "")
         model_family = str(result.get("model_family") or "")
         feature_preference = {
+            "no_visual_features_no_tracking_features": 5,
             "no_visual_features_no_foot_track": 4,
+            "no_visual_crop_no_tracking_features": 4,
             "no_visual_features": 3,
             "pose_only": 3,
             "no_visual_crop_no_foot_track": 3,
+            "no_vision_embedding_no_tracking_features": 3,
+            "no_tracking_features": 3,
             "no_vision_embedding_no_foot_track": 2,
+            "no_cotracker": 2,
             "no_foot_track": 2,
             "no_visual_crop": 2,
             "no_vision_embedding": 1,

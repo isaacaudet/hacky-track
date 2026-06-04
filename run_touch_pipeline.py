@@ -17,6 +17,7 @@ from typing import Any
 
 from attach_touch_l2_features import attach_dataset
 from attach_touch_audio_features import attach_dataset as attach_audio_dataset
+from attach_touch_cotracker_features import attach_dataset as attach_cotracker_dataset
 from attach_touch_flow_features import attach_dataset as attach_flow_dataset
 from attach_touch_foot_track_features import attach_dataset as attach_foot_track_dataset
 from attach_touch_pose_features import attach_dataset as attach_pose_dataset
@@ -204,6 +205,30 @@ def foot_track_feature_summary_for_status(manifest: dict[str, Any] | None) -> di
     }
 
 
+def cotracker_feature_summary_for_status(manifest: dict[str, Any] | None) -> dict[str, Any]:
+    if not manifest:
+        return {
+            "status": "skipped",
+            "train_val_rows": 0,
+            "train_val_processed_rows": 0,
+            "train_val_ok_rows": 0,
+            "test_frozen_rows": 0,
+            "test_frozen_processed_rows": 0,
+            "test_frozen_ok_rows": 0,
+        }
+    return {
+        "status": manifest.get("status"),
+        "model_name": manifest.get("cotracker_model"),
+        "device": manifest.get("cotracker_device"),
+        "train_val_rows": (manifest.get("train_val") or {}).get("rows", 0),
+        "train_val_processed_rows": (manifest.get("train_val") or {}).get("processed_rows", 0),
+        "train_val_ok_rows": (manifest.get("train_val") or {}).get("ok_rows", 0),
+        "test_frozen_rows": (manifest.get("test_frozen") or {}).get("rows", 0),
+        "test_frozen_processed_rows": (manifest.get("test_frozen") or {}).get("processed_rows", 0),
+        "test_frozen_ok_rows": (manifest.get("test_frozen") or {}).get("ok_rows", 0),
+    }
+
+
 def should_run_diagnostic_classifier(classifier_summary: dict[str, Any], *, audio_only: bool) -> bool:
     """Train a non-release diagnostic model when frozen-test labels are the only hard blocker."""
     if audio_only or classifier_summary.get("status") != "not_ready":
@@ -276,6 +301,8 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
         f"- Pose train/test foot-present rows: `{summary['pose_features'].get('train_val_foot_present_rows')}` / `{summary['pose_features'].get('test_frozen_foot_present_rows')}`",
         f"- Foot-track status: `{summary['foot_track_features'].get('status')}`",
         f"- Foot-track train/test rows: `{summary['foot_track_features'].get('train_val_ok_rows')}` / `{summary['foot_track_features'].get('test_frozen_ok_rows')}`",
+        f"- CoTracker status: `{summary['cotracker_features'].get('status')}`",
+        f"- CoTracker train/test rows: `{summary['cotracker_features'].get('train_val_ok_rows')}` / `{summary['cotracker_features'].get('test_frozen_ok_rows')}`",
         f"- Visual-crop status: `{summary['visual_crop_features'].get('status')}`",
         f"- Visual-crop train/test rows: `{summary['visual_crop_features'].get('train_val_ok_rows')}` / `{summary['visual_crop_features'].get('test_frozen_ok_rows')}`",
         f"- Vision-embedding status: `{summary['vision_embedding_features'].get('status')}`",
@@ -627,6 +654,30 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         )
     foot_track_summary = foot_track_feature_summary_for_status(foot_track_manifest)
 
+    cotracker_manifest: dict[str, Any] | None = None
+    if args.attach_cotracker_features:
+        cotracker_manifest = attach_cotracker_dataset(
+            argparse.Namespace(
+                dataset_dir=l2_out_dir,
+                out_dir=l2_out_dir,
+                labels_dir=labels_dir,
+                review_manifest=review_manifest_path,
+                label_match_tolerance_sec=args.touch_tolerance_sec,
+                contact_labeled_only=args.cotracker_contact_labeled_only,
+                row_limit=args.cotracker_row_limit,
+                dry_run=args.cotracker_dry_run,
+                pose_mode=args.cotracker_pose_mode,
+                pose_device=args.cotracker_pose_device,
+                keypoint_threshold=args.cotracker_keypoint_threshold,
+                cotracker_model=args.cotracker_model,
+                cotracker_device=args.cotracker_device,
+                visibility_threshold=args.cotracker_visibility_threshold,
+                window_sec=args.cotracker_window_sec,
+                process_width=args.cotracker_process_width,
+            )
+        )
+    cotracker_summary = cotracker_feature_summary_for_status(cotracker_manifest)
+
     visual_crop_manifest: dict[str, Any] | None = None
     if args.attach_visual_crop_features:
         visual_crop_manifest = attach_visual_crop_dataset(
@@ -730,6 +781,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             "flow_feature_manifest": str(dataset_dir / "touch_flow_feature_manifest.json"),
             "pose_feature_manifest": str(dataset_dir / "touch_pose_feature_manifest.json"),
             "foot_track_feature_manifest": str(dataset_dir / "touch_foot_track_feature_manifest.json"),
+            "cotracker_feature_manifest": str(dataset_dir / "touch_cotracker_feature_manifest.json"),
             "visual_crop_feature_manifest": str(dataset_dir / "touch_visual_crop_feature_manifest.json"),
             "vision_embedding_feature_manifest": str(dataset_dir / "touch_vision_embedding_feature_manifest.json"),
         },
@@ -778,6 +830,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         "flow_features": flow_summary,
         "pose_features": pose_summary,
         "foot_track_features": foot_track_summary,
+        "cotracker_features": cotracker_summary,
         "visual_crop_features": visual_crop_summary,
         "vision_embedding_features": vision_embedding_summary,
         "release_gate": release_gate,
@@ -881,6 +934,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pose-cache-only", action="store_true", help="attach only pose rows already in the pose cache")
     parser.add_argument("--attach-foot-track-features", action="store_true", help="attach temporal foot identity/continuity features from existing RTMW pose geometry")
     parser.add_argument("--foot-track-window-sec", type=float, default=1.0)
+    parser.add_argument("--attach-cotracker-features", action="store_true", help="attach short-window CoTracker foot-continuity features seeded from RTMW foot landmarks")
+    parser.add_argument("--cotracker-contact-labeled-only", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--cotracker-row-limit", type=int)
+    parser.add_argument("--cotracker-dry-run", action="store_true")
+    parser.add_argument("--cotracker-pose-mode", choices=["lightweight", "balanced", "performance"], default="performance")
+    parser.add_argument("--cotracker-pose-device", default="cpu")
+    parser.add_argument("--cotracker-keypoint-threshold", type=float, default=0.25)
+    parser.add_argument("--cotracker-model", default="cotracker3_offline")
+    parser.add_argument("--cotracker-device", default="mps")
+    parser.add_argument("--cotracker-visibility-threshold", type=float, default=0.5)
+    parser.add_argument("--cotracker-window-sec", type=float, default=0.8)
+    parser.add_argument("--cotracker-process-width", type=int, default=512)
     parser.add_argument("--attach-visual-crop-features", action="store_true", help="attach cached ball-centered visual crop descriptors for contact side/surface classification")
     parser.add_argument("--visual-crop-ball-tolerance-sec", type=float, default=0.08)
     parser.add_argument("--visual-crop-size-px", type=int, default=224)

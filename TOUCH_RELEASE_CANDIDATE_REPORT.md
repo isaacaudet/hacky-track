@@ -208,8 +208,8 @@ clip-disjoint contact metrics are:
 
 | target | rows | selected model | raw / balanced accuracy | gate |
 | --- | ---: | --- | ---: | --- |
-| contact type | 82 | ridge classifier, no visual crop and no foot-track | 0.963 / 0.786 | raw pass; release-scope fail until stall/knee/drop labels reach the floor |
-| wearer side | 76 | LinearSVC, no visual features; diagnostic temporal smoothing | 0.776 / 0.752 raw, 0.816 / 0.791 smoothed | fail; smoothing remains diagnostic-only |
+| contact type | 82 | ridge classifier, no visual crop and no tracking features | 0.963 / 0.786 | raw pass; release-scope fail until stall/knee/drop labels reach the floor |
+| wearer side | 76 | LinearSVC, no visual/tracking features; diagnostic temporal smoothing | 0.776 / 0.752 raw, 0.816 / 0.791 smoothed | fail; smoothing remains diagnostic-only |
 | inner/outer surface | 25 | gradient boosting, pose only | 0.800 / 0.643 | fail |
 | drop/floor reset | 35 | ExtraTrees over OWLv2/L2 + floor/context + merged-touch gap features | 0.682 P / 0.714 R | fail |
 | stall | 32 | n/a | n/a | not ready: 3 approved stalls |
@@ -249,8 +249,8 @@ runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/contact_err
 runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/contact_error_audit/sequence_smoothed_strips/
 ```
 
-The smoothed-side audit leaves 15 held-out failures: 4 pose-side disagreements,
-6 visual-ambiguity cases, and 5 pose-missing cases. This is why the side layer
+The smoothed-side audit leaves 14 held-out failures: 4 pose-side disagreements,
+6 visual-ambiguity cases, and 4 pose-missing cases. This is why the side layer
 stays diagnostic-only.
 
 Foot-track feature artifact:
@@ -266,6 +266,20 @@ for reviewed/manual display workflows only. Those manual fields are deliberately
 excluded from automatic classifier features. In clip-disjoint evaluation the
 automatic foot-track features do not improve side or surface enough to promote
 HUD badges, and the selected release-safe modes exclude them where they hurt.
+
+CoTracker feature artifact:
+
+```text
+runs/release-27-public/touch_corpus_v1/touch_training_dataset_v1/touch_cotracker_feature_report.md
+```
+
+CoTracker3 was run on the current contact-labeled corpus with RTMW foot
+landmarks as seeds. It produced 63 usable tracked windows out of 82 processed
+contact-labeled candidates (11/17 train+validation, 52/65 frozen test). The
+feature ablation still selects no-tracking modes for contact type and side;
+side remains `0.776 / 0.752` and surface remains `0.800 / 0.643`. So CoTracker
+is implemented and measured, but not promoted as an automatic side/surface
+badge signal.
 
 Supplemental detection-cache smoke check:
 
