@@ -206,11 +206,11 @@ from the frozen-only release metric above.
 Side/surface/contact classification remains separate from touch timing. Current
 clip-disjoint contact metrics are:
 
-| target | rows | selected model | accuracy | gate |
+| target | rows | selected model | raw / balanced accuracy | gate |
 | --- | ---: | --- | ---: | --- |
-| contact type | 82 | ridge classifier, no visual crop | 0.951 | raw pass; release-scope fail until stall/knee/drop labels reach the floor |
-| wearer side | 76 | ExtraTrees, no ball-centered visual crop | 0.750 | fail |
-| inner/outer surface | 25 | ExtraTrees, no ball-centered visual crop | 0.760 | fail |
+| contact type | 82 | ridge classifier, no visual crop | 0.951 / 0.779 | raw pass; release-scope fail until stall/knee/drop labels reach the floor |
+| wearer side | 76 | logistic regression, no vision embedding | 0.750 / 0.702 | fail |
+| inner/outer surface | 25 | logistic regression, all features | 0.760 / 0.615 | fail |
 | drop/floor reset | 35 | ExtraTrees over OWLv2/L2 + floor/context + merged-touch gap features | 0.682 P / 0.714 R | fail |
 | stall | 32 | n/a | n/a | not ready: 3 approved stalls |
 
@@ -339,7 +339,7 @@ python3 -m unittest \
   tests.test_release_event_error_audit
 ```
 
-Current result: `277` tests pass.
+Current result: `278` tests pass.
 
 ## Remaining Risks
 

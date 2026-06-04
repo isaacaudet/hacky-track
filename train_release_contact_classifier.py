@@ -653,6 +653,25 @@ def confusion_counts(labels: Iterable[str], preds: Iterable[str]) -> dict[str, d
     return {label: dict(preds_by_label) for label, preds_by_label in sorted(matrix.items())}
 
 
+def classification_quality(labels: Iterable[str], preds: Iterable[str]) -> dict[str, Any]:
+    label_list = [str(label) for label in labels]
+    pred_list = [str(pred) for pred in preds]
+    total = len(label_list)
+    correct = sum(1 for label, pred in zip(label_list, pred_list) if label == pred)
+    confusion = confusion_counts(label_list, pred_list)
+    per_class_recall: dict[str, float | None] = {}
+    for label, pred_counts in confusion.items():
+        class_total = sum(int(count) for count in pred_counts.values())
+        per_class_recall[label] = None if class_total <= 0 else float(pred_counts.get(label, 0) / class_total)
+    valid_recalls = [value for value in per_class_recall.values() if value is not None]
+    return {
+        "accuracy": correct / total if total else None,
+        "balanced_accuracy": sum(valid_recalls) / len(valid_recalls) if valid_recalls else None,
+        "per_class_recall": per_class_recall,
+        "confusion": confusion,
+    }
+
+
 def selective_accuracy_rows(predictions: list[dict[str, Any]], thresholds: tuple[float, ...] = (0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95)) -> list[dict[str, Any]]:
     rows = []
     total = len(predictions)
@@ -758,8 +777,8 @@ def train_single_contact_target(
             None,
         )
 
-    correct = sum(1 for row in predictions if row["correct"])
-    accuracy = correct / len(predictions)
+    quality = classification_quality((row["label"] for row in predictions), (row["prediction"] for row in predictions))
+    accuracy = float(quality["accuracy"] or 0.0)
     final_model = build_model(model_family)
     final_model.fit([contact_feature_dict(row, disabled_prefixes=disabled_prefixes) for row in labeled], labels)
     gate = "pass" if accuracy >= CONTACT_GATE_ACCURACY else "fail"
@@ -801,12 +820,14 @@ def train_single_contact_target(
         "release_scope_blockers": release_scope_blockers,
         "release_class_coverage": class_coverage,
         "accuracy": accuracy,
+        "balanced_accuracy": quality["balanced_accuracy"],
+        "per_class_recall": quality["per_class_recall"],
         "rows": len(predictions),
         "training_rows": len(labeled),
         "videos": videos,
         "label_counts": dict(label_counts),
         "prediction_counts": dict(Counter(row["prediction"] for row in predictions)),
-        "confusion": confusion_counts((row["label"] for row in predictions), (row["prediction"] for row in predictions)),
+        "confusion": quality["confusion"],
         "selective_accuracy": selective_accuracy_rows(predictions),
         "folds": folds,
         "skipped_folds": skipped_folds,
@@ -850,7 +871,7 @@ def train_single_contact_target_best_mode(
         result["model_mode_results"] = combo_results
         return result, None
 
-    def selection_key(item: tuple[str, dict[str, Any]]) -> tuple[float, int, int]:
+    def selection_key(item: tuple[str, dict[str, Any]]) -> tuple[float, float, int, int]:
         _key, result = item
         feature_mode = str(result.get("feature_mode") or "")
         model_family = str(result.get("model_family") or "")
@@ -866,7 +887,12 @@ def train_single_contact_target_best_mode(
             "extra_trees": 1,
             "gradient_boosting": 0,
         }.get(model_family, 0)
-        return (float(result.get("accuracy") or 0.0), feature_preference, model_preference)
+        return (
+            float(result.get("accuracy") or 0.0),
+            float(result.get("balanced_accuracy") or 0.0),
+            feature_preference,
+            model_preference,
+        )
 
     best_key, best_result = max(
         trained,
@@ -1022,6 +1048,8 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
                 lines.append(f"- Selected feature mode: `{result.get('selected_feature_mode') or result.get('feature_mode')}`")
                 lines.append(f"- Selected model family: `{result.get('selected_model_family') or result.get('model_family')}`")
                 lines.append(f"- Leave-one-video-out accuracy: `{result.get('accuracy'):.3f}`")
+                if result.get("balanced_accuracy") is not None:
+                    lines.append(f"- Leave-one-video-out balanced accuracy: `{result.get('balanced_accuracy'):.3f}`")
                 lines.append(f"- Gate: `{result.get('gate')}` at >= `{result.get('gate_accuracy_threshold')}`")
                 lines.append(f"- Release-scope gate: `{result.get('release_scope_gate')}`")
                 for blocker in result.get("gate_blockers") or []:
@@ -1041,12 +1069,15 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
                 lines.append(f"- Label counts: `{result.get('label_counts')}`")
                 lines.append(f"- Prediction counts: `{result.get('prediction_counts')}`")
                 lines.append(f"- Confusion: `{result.get('confusion')}`")
+                if result.get("per_class_recall"):
+                    lines.append(f"- Per-class recall: `{result.get('per_class_recall')}`")
                 if result.get("feature_mode_results"):
                     lines.append("- Feature-mode ablation:")
                     for mode, mode_result in result["feature_mode_results"].items():
                         if mode_result.get("status") == "trained":
                             lines.append(
                                 f"  - `{mode}`: accuracy `{mode_result.get('accuracy'):.3f}`, "
+                                f"balanced `{mode_result.get('balanced_accuracy'):.3f}`, "
                                 f"model `{mode_result.get('selected_model_family') or mode_result.get('model_family')}`, "
                                 f"gate `{mode_result.get('gate')}`"
                             )
@@ -1058,6 +1089,7 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
                         if family_result.get("status") == "trained":
                             lines.append(
                                 f"  - `{family}`: accuracy `{family_result.get('accuracy'):.3f}`, "
+                                f"balanced `{family_result.get('balanced_accuracy'):.3f}`, "
                                 f"feature mode `{family_result.get('selected_feature_mode') or family_result.get('feature_mode')}`, "
                                 f"gate `{family_result.get('gate')}`"
                             )

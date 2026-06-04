@@ -48,25 +48,25 @@ Current matched reviewed labels:
 
 Clip-disjoint leave-one-video-out results:
 
-| target | accuracy | gate | selected feature mode | interpretation |
-| --- | ---: | --- | --- | --- |
-| contact type | 0.951 | raw pass / release-scope fail | no_visual_crop + ridge classifier | Raw kick/stall accuracy passes, but class coverage blocks full v1.0: stall 7, knee 0, drop_floor 0. |
-| side | 0.750 | fail | no_visual_crop + ExtraTrees | Improved from 0.628, but still below the 0.85 side gate. |
-| surface | 0.760 | fail | no_visual_crop + ExtraTrees | Still below gate; inner examples are the dominant misses. |
+| target | accuracy | balanced accuracy | gate | selected feature mode | interpretation |
+| --- | ---: | ---: | --- | --- | --- |
+| contact type | 0.951 | 0.779 | raw pass / release-scope fail | no_visual_crop + ridge classifier | Raw kick/stall accuracy passes, but stall recall is only 0.571 and class coverage blocks full v1.0: stall 7, knee 0, drop_floor 0. |
+| side | 0.750 | 0.702 | fail | no_vision_embedding + logistic regression | Raw accuracy holds at 0.750 while left recall improves to 0.560; still below the 0.85 side gate. |
+| surface | 0.760 | 0.615 | fail | all_features + logistic regression | Raw accuracy holds at 0.760 while inner recall improves to 0.286; still below gate and label-limited. |
 
 Feature-mode ablation:
 
-| target | current best | prior logistic baseline | result |
-| --- | ---: | ---: | --- |
-| contact type | 0.951 | 0.902 | Ridge classifier is strongest on the current kick/stall set, but release-scope coverage is still missing stall/knee/drop labels. |
-| side | 0.750 | 0.628 | ExtraTrees beats majority baseline (0.671), but still misses many left contacts. |
-| surface | 0.760 | 0.760 | Model family does not clear the small, imbalanced inner/outer set. |
+| target | current best | balanced accuracy | prior logistic baseline | result |
+| --- | ---: | ---: | ---: | --- |
+| contact type | 0.951 | 0.779 | 0.902 | Ridge classifier is strongest on the current kick/stall set, but release-scope coverage is still missing stall/knee/drop labels. |
+| side | 0.750 | 0.702 | 0.628 | Balanced tie-break selects logistic regression over ExtraTrees; left recall improves from 0.400 to 0.560 without lowering raw accuracy. |
+| surface | 0.760 | 0.615 | 0.760 | Balanced tie-break selects the all-feature logistic model; inner recall improves from 0.143 to 0.286 without lowering raw accuracy. |
 
 Confidence/abstention does not rescue the failing targets:
 
-- Side stays below gate; the new ExtraTrees model reaches 0.750 full coverage but high-confidence abstention does not rescue it.
+- Side stays below gate; the selected model reaches 0.750 full coverage / 0.702 balanced accuracy, but high-confidence abstention does not rescue it.
 - All current approved/training side labels are now `wearer_limb`, inferred from the side-specific trick labels you already reviewed.
-- Surface stays below gate; selected model is 0.760 at full coverage and remains below 0.85 under confidence filtering.
+- Surface stays below gate; selected model is 0.760 raw / 0.615 balanced accuracy and remains below 0.85 under confidence filtering.
 - Contact type has a raw accuracy pass, but the new release-scope gate correctly keeps it unpromoted until stall/knee/drop_floor class coverage reaches the release floor.
 
 ### Pose / Body Proximity
@@ -232,6 +232,7 @@ Code changes:
 - `train_release_contact_classifier.py` now evaluates feature modes per target and stores selected target-specific modes in the model artifact.
 - `train_release_contact_classifier.py` now evaluates bounded model families per target (`logistic_regression`, `extra_trees`, `gradient_boosting`) and stores the selected family in the model artifact.
 - `train_release_contact_classifier.py` now reports selective accuracy by prediction confidence, so abstention claims are measurable.
+- `train_release_contact_classifier.py` now reports balanced accuracy/per-class recall and uses balanced accuracy as a tie-breaker when raw leave-one-video-out accuracy is equal.
 - `train_release_contact_classifier.py` now separates raw accuracy gates from release-scope gates, so kick/stall accuracy cannot be promoted as full kick/knee/stall/drop intelligence until class coverage exists.
 - `contact_error_audit.py` renders visual strips for current contact classifier errors, clears stale strips before rendering, and buckets failures by likely mode.
 - `render_touch_release_hud.py` now attaches reviewed contact labels to matched merged touch events as manual HUD badges, with provenance and match deltas.
@@ -271,7 +272,7 @@ python3 -m unittest discover tests
 Current result:
 
 ```text
-Ran 277 tests in 7.844s
+Ran 278 tests in 7.538s
 OK
 ```
 
@@ -303,9 +304,9 @@ Do not render these as product facts until the gate passes.
 
 | signal | minimum labels | release gate | current state |
 | --- | ---: | --- | --- |
-| left/right side | >=20 explicit wearer-limb labels per promoted class, >=3 videos | >=85% clip-disjoint side accuracy | 76 wearer-limb rows, 0.750 accuracy, fail |
-| inner/outer surface | >=20 per promoted class, >=3 videos | >=85% clip-disjoint surface accuracy | 25 rows, 0.760 accuracy, fail |
-| contact type: kick/knee/stall/drop | >=20 per promoted class, >=3 videos | >=85% contact-type accuracy | 82 rows, 0.951 raw accuracy, release-scope fail: stall 7, knee 0, drop_floor 0 |
+| left/right side | >=20 explicit wearer-limb labels per promoted class, >=3 videos | >=85% clip-disjoint side accuracy | 76 wearer-limb rows, 0.750 raw / 0.702 balanced accuracy, fail |
+| inner/outer surface | >=20 per promoted class, >=3 videos | >=85% clip-disjoint surface accuracy | 25 rows, 0.760 raw / 0.615 balanced accuracy, fail |
+| contact type: kick/knee/stall/drop | >=20 per promoted class, >=3 videos | >=85% contact-type accuracy | 82 rows, 0.951 raw / 0.779 balanced accuracy, release-scope fail: stall 7, knee 0, drop_floor 0 |
 | drop/floor reset | enough reviewed positives and negatives across clips | precision >=90%, recall >=90% | 35 clean reviewed reset rows, 0.682 P / 0.714 R after rally-sequence reset features, fail |
 | stall | enough reviewed stall windows and non-stall controls | precision >=85%, recall >=80% | 32 clean reviewed stall candidates, but only 3 approved stalls, not-ready |
 | tricks | >=20 examples per promoted trick | >=80% held-out precision | not ready |

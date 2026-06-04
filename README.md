@@ -152,9 +152,9 @@ Current v1.0 contact-intelligence status is intentionally split:
 | touch timing | release-candidate, merged event-level gates pass with the complete OWLv2 detection cache set |
 | HUD touch sparks | release-candidate, OWLv2/L2 anchors, no HSV fallback |
 | reviewed contact badges | manual/label-backed HUD display only |
-| contact type | candidate, raw kick/stall accuracy reaches 0.951 but release-scope fails without enough stall/knee/drop labels |
-| left/right side | candidate, below release gate |
-| inner/outer surface | candidate, below release gate |
+| contact type | candidate, raw kick/stall accuracy reaches 0.951, balanced accuracy 0.779; release-scope fails without enough stall/knee/drop labels |
+| left/right side | candidate, below release gate at 0.750 raw / 0.702 balanced accuracy |
+| inner/outer surface | candidate, below release gate at 0.760 raw / 0.615 balanced accuracy |
 | automatic drop/floor reset | evaluated candidate, fails gate at 0.682 precision / 0.714 recall after rally-sequence reset features |
 | automatic stall | not ready; only 3 approved stall examples in the existing reviewed reset/stall corpus |
 

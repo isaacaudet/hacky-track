@@ -14,6 +14,17 @@ def write_json(path: Path, data: dict) -> None:
 
 
 class ReleaseContactClassifierTests(unittest.TestCase):
+    def test_classification_quality_reports_balanced_accuracy(self) -> None:
+        labels = ["left", "left", "right", "right", "right", "right"]
+        preds = ["left", "right", "right", "right", "right", "left"]
+
+        quality = contact.classification_quality(labels, preds)
+
+        self.assertAlmostEqual(quality["accuracy"], 4 / 6)
+        self.assertAlmostEqual(quality["per_class_recall"]["left"], 0.5)
+        self.assertAlmostEqual(quality["per_class_recall"]["right"], 0.75)
+        self.assertAlmostEqual(quality["balanced_accuracy"], 0.625)
+
     def test_pose_candidate_maps_lower_body_part_to_soft_type_and_side(self) -> None:
         row = {
             "pose_nearest_lower_part": "left_big_toe",
