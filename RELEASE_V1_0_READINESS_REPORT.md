@@ -4,7 +4,7 @@
 
 `not_ready_for_v1_0`
 
-v0.1 generic touch timing and the OWLv2/L2 HUD path are release-shaped. v1.0 rally intelligence is the next layer: left/right, inner/outer, knee, stall/drop, tricks, and calibrated HUD badges. The current code now has the right training/evaluation scaffolding and the first contact classifier, but automatic touch recall on leave-clips-out CV, side, and surface are not accurate enough to ship as broad product facts.
+v0.1 generic touch timing and the OWLv2/L2 HUD path are release-shaped. v1.0 rally intelligence is the next layer: left/right, inner/outer, knee, stall/drop, tricks, and calibrated HUD badges. The current code now has the right training/evaluation scaffolding and the first contact classifier, but side and surface are not accurate enough to ship as broad product facts.
 
 ## Current Evidence
 
@@ -20,14 +20,15 @@ Current merged-event touch status:
 
 | split | precision | recall | F1 | gate |
 | --- | ---: | ---: | ---: | --- |
-| leave-clips-out CV | 0.916 | 0.792 | 0.849 | fail recall |
-| frozen test | 0.986 | 0.986 | 0.986 | pass |
+| leave-clips-out CV | 0.925 | 0.896 | 0.910 | pass |
+| frozen test | 0.979 | 0.986 | 0.982 | pass |
 
 Interpretation:
 
 - Frozen-test touch timing is release-shaped, especially with reviewed visual HUD overrides.
-- Leave-clips-out CV now exposes a real automatic-touch recall blocker, concentrated in `video-340_singular_display-2` and `video-344_singular_display-2`.
-- This does not invalidate the HUD renderer or manual-corrected preview path, but it prevents a broad automatic v1.0 release claim.
+- Leave-clips-out CV now passes after including both OWLv2 detection caches in the L2 feature attachment path.
+- The prior `video-340_singular_display-2` failure was a missing-cache problem, not a classifier weakness: the main cache omitted the clip, while `owlv2_touch_detections_contact_missing_v1/detections.jsonl` contains the needed detections.
+- `video-344_singular_display-2` remains the weakest automatic-touch clip, but the aggregate merged-event gate now passes.
 
 ### Contact Classifier
 
@@ -234,6 +235,8 @@ Code changes:
 - `train_release_contact_classifier.py` now reports selective accuracy by prediction confidence, so abstention claims are measurable.
 - `contact_error_audit.py` renders visual strips for current contact classifier errors, clears stale strips before rendering, and buckets failures by likely mode.
 - `render_touch_release_hud.py` now attaches reviewed contact labels to matched merged touch events as manual HUD badges, with provenance and match deltas.
+- `render_touch_release_hud.py` and `hackytrack.py touch-release` now accept multiple OWLv2 detection JSONLs, so supplemental contact-missing caches are not silently dropped.
+- `run_touch_pipeline.py` now records the actual detection JSONL inputs in the status report and prints a reproducible release command using those inputs.
 - `release_rally_analytics.py` now reports manual contact badge coverage separately from automatic touch metrics.
 - `side_semantics_audit.py` audits side labels against pose and screen-side conventions, with visual disagreement strips.
 - `touch_review_app.py` and contact-label parsing support the full label vocabulary: left/right kick, inner/outer, knee, stall, and ground/drop.
@@ -268,7 +271,7 @@ python3 -m unittest discover tests
 Current result:
 
 ```text
-Ran 258 tests in 6.365s
+Ran 260 tests in 6.280s
 OK
 ```
 

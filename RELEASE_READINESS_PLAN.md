@@ -45,7 +45,7 @@ v0.1 touch timing is release-ready:
 - Visual-corrected frozen HUD set passes video/audio/nonblank checks.
 - Frozen-test visual-corrected HUD analytics: precision `1.000`, recall `0.993`, F1 `0.996`, false positives `0`, missed touches `1`.
 - One-command release workflow writes `runs/release-27-public/touch_release_v0_1/touch_release_readiness.md` with status `release_ready_v0_1`.
-- Full test suite passes: `224/224`.
+- Full test suite passes: `260/260` in the latest verification pass.
 
 Current non-goal status:
 

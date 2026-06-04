@@ -73,8 +73,8 @@ release_ready_v0_1
 
 | split | precision | recall | F1 | FP | FN | gate |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| leave-clips-out CV | 0.916 | 0.894 | 0.905 | 7 | 9 | PASS |
-| frozen test | 0.986 | 0.993 | 0.989 | 2 | 1 | PASS |
+| leave-clips-out CV | 0.925 | 0.896 | 0.910 | 7 | 10 | PASS |
+| frozen test | 0.979 | 0.986 | 0.982 | 3 | 2 | PASS |
 
 Thresholds:
 
@@ -173,6 +173,7 @@ runs/release-27-public/touch_release_v0_1/contact_classifier/release_contact_cla
 - Trick recognition is not promoted.
 - Current evidence is strong for the reviewed corpus, but additional visual labels would shrink confidence intervals and harden generalization.
 - `video-344_singular_display-2` remains the weakest leave-one-video-out clip for touch recall.
+- The touch pipeline must use both cached OWLv2 detection JSONLs; the supplemental contact-missing cache supplies `video-340_singular_display-2`, which the primary cache omitted.
 
 ## Tests
 
@@ -186,7 +187,7 @@ python3 -m unittest discover tests
 Result:
 
 ```text
-258/258 tests pass
+260/260 tests pass
 ```
 
 ## Release Decision
@@ -207,7 +208,7 @@ Full rally intelligence / contact-type / trick-classification release
 
 v1.0 work should focus on:
 
-1. Improve automatic touch recall on the hard leave-clips-out clips without regressing frozen-test timing.
+1. Harden automatic touch recall on the weakest leave-clips-out clip (`video-344_singular_display-2`) without regressing aggregate gates.
 2. Improve wearer-side and inner/outer surface classification from the current below-gate baselines.
 3. Add knee/drop/stall diversity before promoting full contact-type claims beyond kick/stall.
 4. Build automatic stall/drop prediction and evaluate separately.

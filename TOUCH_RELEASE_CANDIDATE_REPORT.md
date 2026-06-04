@@ -2,21 +2,22 @@
 
 ## Status
 
-`trained_gate_failed_cv_recall`
+`release_gate_passed`
 
 This release candidate promotes the touch pipeline to merged event-level output. Raw cue candidates are still tracked for diagnostics, but the product-facing touch output is the event-level merge/NMS result.
 
 Current status is intentionally split:
 
-- Model-only frozen-test merged events pass the touch gate.
+- Model-only merged events pass both leave-clips-out CV and frozen-test touch gates when the complete OWLv2 detection cache set is supplied.
 - Visual-corrected frozen-test HUDs are excellent and remain useful release preview artifacts.
-- Leave-clips-out CV merged events still fail recall, so the fully automatic touch model is not a broad v1.0 release claim yet.
+- Side/surface/contact intelligence remains separate from touch timing and is not v1.0-ready.
 
 ## Reproduction Command
 
 ```bash
 python3 run_touch_pipeline.py \
   --detections-jsonl runs/release-27-public/touch_corpus_v1/owlv2_touch_detections_v1/detections.jsonl \
+  --detections-jsonl runs/release-27-public/touch_corpus_v1/owlv2_touch_detections_contact_missing_v1/detections.jsonl \
   --attach-audio-features
 ```
 
@@ -30,8 +31,8 @@ runs/release-27-public/touch_corpus_v1/touch_pipeline_status.md
 
 | split | gate level | precision | recall | f1 | fp | fn | result |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| leave-clips-out CV | merged event | 0.916 | 0.792 | 0.849 | 7 | 20 | FAIL recall |
-| frozen test | merged event | 0.986 | 0.986 | 0.986 | 2 | 2 | PASS |
+| leave-clips-out CV | merged event | 0.925 | 0.896 | 0.910 | 7 | 10 | PASS |
+| frozen test | merged event | 0.979 | 0.986 | 0.982 | 3 | 2 | PASS |
 
 Gate thresholds:
 
@@ -43,15 +44,19 @@ Gate thresholds:
 The top-level pipeline status reports:
 
 ```text
-Status: trained_gate_failed
+Status: release_gate_passed
 Release gate level: merged_event
-Leave-clips-out CV gate: False
+Leave-clips-out CV gate: True
 Frozen-test gate: True
 ```
 
-Main CV recall failures are concentrated in `video-340_singular_display-2` and
-`video-344_singular_display-2`; those clips are the next automatic-touch model
-blocker, not HUD rendering.
+The prior CV recall blocker was caused by running with only
+`owlv2_touch_detections_v1/detections.jsonl`, which omitted
+`video-340_singular_display-2`. Including
+`owlv2_touch_detections_contact_missing_v1/detections.jsonl` restores L2
+trajectory features for that clip and moves event-level CV over gate. The
+remaining weak automatic-touch clip is `video-344_singular_display-2`, but the
+aggregate merged-event gate now passes.
 
 ## HUD Status
 
@@ -211,6 +216,22 @@ The HUD now shows reviewed contact labels as manual badges when a merged touch
 matches a visual label. These are explicitly label-backed display facts, not
 automatic side/surface classifier predictions.
 
+Supplemental detection-cache smoke check:
+
+```bash
+python3 render_touch_release_hud.py \
+  --out-dir runs/release-27-public/touch_corpus_v1/release_touch_hud_v9_detection_cache_complete_smoke \
+  --video-id video-340_singular_display-2 \
+  --max-seconds 12 \
+  --allow-missing-audio
+```
+
+This verifies the clip that was missing from the primary detection cache:
+
+| video | touches | anchors | center source | video/audio/nonblank |
+| --- | ---: | ---: | --- | --- |
+| `video-340_singular_display-2` | 11 | 11 | `l2_clean_interpolated:11` | True/True/True |
+
 ## What Changed
 
 - The classifier still uses the fixed OWLv2 detector cache and does not lower the detector threshold.
@@ -298,7 +319,7 @@ python3 -m unittest \
   tests.test_release_event_error_audit
 ```
 
-Current result: `258` tests pass.
+Current result: `260` tests pass.
 
 ## Remaining Risks
 
@@ -308,6 +329,7 @@ Current result: `258` tests pass.
 - Reviewed contact badges are manual display facts; automatic side/surface badges remain blocked by failed contact gates.
 - Candidate-level CV still fails; the release pass depends on merged event-level output, which is the intended product output.
 - `video-344_singular_display-2` remains the weakest leave-one-video-out clip. Its remaining misses are mostly weak trajectory impulse, touch/stall overlap, or low classifier score.
+- The release command must include both OWLv2 detection JSONLs above; omitting the contact-missing cache removes trajectory features for `video-340_singular_display-2` and reproduces the old recall failure.
 - Remaining leave-clips-out errors are concentrated in trajectory artifacts and track gaps, not OWLv2 detection thresholding.
 - Label coverage is adequate for this release gate, but more visually reviewed clips would harden the classifier and shrink confidence intervals.
 - The cached OWLv2 detections file is large, so full status refreshes are slower than ideal.

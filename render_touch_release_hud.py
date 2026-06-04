@@ -31,6 +31,7 @@ DEFAULT_CORPUS = ROOT / "runs/release-27-public/touch_corpus_v1"
 DEFAULT_FROZEN_EVENTS = DEFAULT_CORPUS / "touch_classifier_v1/touch_classifier_frozen_events.jsonl"
 DEFAULT_OOF_EVENTS = DEFAULT_CORPUS / "touch_classifier_v1/touch_classifier_oof_events.jsonl"
 DEFAULT_DETECTIONS = DEFAULT_CORPUS / "owlv2_touch_detections_v1/detections.jsonl"
+DEFAULT_EXTRA_DETECTIONS = DEFAULT_CORPUS / "owlv2_touch_detections_contact_missing_v1/detections.jsonl"
 DEFAULT_INVENTORY = DEFAULT_CORPUS / "touch_corpus_inventory.json"
 DEFAULT_VISUAL_LABELS = DEFAULT_CORPUS / "visual_touch_labels"
 DEFAULT_LEGACY_EVENTS_DIR = ROOT / "data"
@@ -419,6 +420,30 @@ def stream_detection_tracks(path: Path, video_ids: set[str], threshold: float) -
                 by_time[key] = point
         tracks[video_id] = sorted(by_time.values(), key=lambda item: item.time_sec)
     return tracks
+
+
+def merge_detection_tracks(track_sets: list[dict[str, list[TrackPoint]]], video_ids: set[str]) -> dict[str, list[TrackPoint]]:
+    merged: dict[str, dict[float, TrackPoint]] = {video_id: {} for video_id in video_ids}
+    for tracks in track_sets:
+        for video_id, points in tracks.items():
+            if video_id not in merged:
+                continue
+            for point in points:
+                key = round(point.time_sec, 6)
+                prior = merged[video_id].get(key)
+                if prior is None or point.confidence > prior.confidence:
+                    merged[video_id][key] = point
+    return {
+        video_id: sorted(points.values(), key=lambda item: item.time_sec)
+        for video_id, points in merged.items()
+    }
+
+
+def default_detection_jsonls() -> list[Path]:
+    paths = [DEFAULT_DETECTIONS]
+    if DEFAULT_EXTRA_DETECTIONS.exists():
+        paths.append(DEFAULT_EXTRA_DETECTIONS)
+    return paths
 
 
 def split_segments(points: list[TrackPoint], max_gap_sec: float) -> list[list[TrackPoint]]:
@@ -845,8 +870,12 @@ def render_release_huds(args: argparse.Namespace) -> dict[str, Any]:
     selected = {video_id: inventory[video_id] for video_id in chosen_ids}
 
     print(f"selected videos: {', '.join(chosen_ids)}")
-    print(f"loading OWLv2 detections from {args.detections_jsonl} ...")
-    raw_tracks = stream_detection_tracks(args.detections_jsonl, set(chosen_ids), args.threshold)
+    detection_jsonls = list(args.detections_jsonl or default_detection_jsonls())
+    print("loading OWLv2 detections from " + ", ".join(str(path) for path in detection_jsonls) + " ...")
+    raw_tracks = merge_detection_tracks(
+        [stream_detection_tracks(path, set(chosen_ids), args.threshold) for path in detection_jsonls],
+        set(chosen_ids),
+    )
     clean_tracks = {video_id: clean_track(points, args.max_track_gap_sec) for video_id, points in raw_tracks.items()}
     touch_overrides = load_touch_overrides(args.touch_overrides)
     generate_assets(args.assets)
@@ -933,7 +962,7 @@ def render_release_huds(args: argparse.Namespace) -> dict[str, Any]:
         "corpus": str(DEFAULT_CORPUS),
         "frozen_events": str(args.frozen_events),
         "oof_events": str(args.oof_events),
-        "detections_jsonl": str(args.detections_jsonl),
+        "detections_jsonl": [str(path) for path in detection_jsonls],
         "visual_labels_dir": str(args.visual_labels_dir),
         "legacy_events_dir": str(args.legacy_events_dir),
         "touch_overrides": None if args.touch_overrides is None else str(args.touch_overrides),
@@ -955,7 +984,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Render release HUD clips from merged touch-classifier events")
     parser.add_argument("--frozen-events", type=Path, default=DEFAULT_FROZEN_EVENTS)
     parser.add_argument("--oof-events", type=Path, default=DEFAULT_OOF_EVENTS)
-    parser.add_argument("--detections-jsonl", type=Path, default=DEFAULT_DETECTIONS)
+    parser.add_argument("--detections-jsonl", type=Path, action="append", default=None)
     parser.add_argument("--inventory", type=Path, default=DEFAULT_INVENTORY)
     parser.add_argument("--visual-labels-dir", type=Path, default=DEFAULT_VISUAL_LABELS)
     parser.add_argument("--legacy-events-dir", type=Path, default=DEFAULT_LEGACY_EVENTS_DIR)

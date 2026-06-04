@@ -205,6 +205,15 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
     diagnostic_cv = diagnostic.get("cv_gate") or {}
     diagnostic_agg = diagnostic.get("leave_one_video_out_aggregate") or {}
     diagnostic_errors = diagnostic.get("out_of_fold_errors") or {}
+    detection_inputs = summary.get("detection_inputs") or {}
+    detection_jsonls = [str(item) for item in detection_inputs.get("jsonl", [])]
+    detection_dirs = [str(item) for item in detection_inputs.get("dirs", [])]
+    release_command_parts = ["python3 run_touch_pipeline.py"]
+    for detection_jsonl in detection_jsonls:
+        release_command_parts.extend(["--detections-jsonl", detection_jsonl])
+    for detections_dir in detection_dirs:
+        release_command_parts.extend(["--detections-dir", detections_dir])
+    release_command_parts.append("--attach-audio-features")
     lines = [
         "# Fixed-OWLv2 Touch Pipeline Status",
         "",
@@ -233,6 +242,8 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
         f"- Negative candidate rows without review: `{summary['training_table'].get('negative_candidate_rows_without_review')}`",
         f"- OWLv2 export status: `{summary['owlv2_export'].get('status')}`",
         f"- OWLv2 frames planned/exported: `{summary['owlv2_export'].get('frames_planned')}` / `{summary['owlv2_export'].get('frames_exported')}`",
+        f"- Detection JSONL inputs: `{len(detection_jsonls)}`",
+        f"- Detection directory inputs: `{len(detection_dirs)}`",
         f"- L2 rows with features: `{summary['l2_features'].get('train_val_ok_rows')}`",
         f"- Audio timbre status: `{summary['audio_features'].get('status')}`",
         f"- Audio timbre train/test rows: `{summary['audio_features'].get('train_val_ok_rows')}` / `{summary['audio_features'].get('test_frozen_ok_rows')}`",
@@ -318,7 +329,7 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
             "python3 import_existing_touch_labels.py",
             "python3 touch_review_app.py",
             "python3 run_touch_pipeline.py --export-owlv2-detections",
-            "python3 run_touch_pipeline.py --detections-jsonl path/to/owlv2_detections.jsonl",
+            " ".join(release_command_parts),
             "```",
             "",
             "Notes:",
@@ -719,6 +730,10 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             "touches_without_candidate": training_manifest["touches_without_candidate"],
         },
         "owlv2_export": owlv2_export_summary,
+        "detection_inputs": {
+            "jsonl": [str(path) for path in detection_jsonls],
+            "dirs": [str(path) for path in args.detections_dir],
+        },
         "l2_features": l2_summary,
         "audio_features": audio_summary,
         "flow_features": flow_summary,

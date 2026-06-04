@@ -145,6 +145,22 @@ class ReleaseCliTests(unittest.TestCase):
         self.assertEqual(args.tracker_mode, "temporal")
         self.assertEqual(args.process_width, 688)
 
+    def test_touch_release_accepts_multiple_detection_jsonls(self) -> None:
+        parser = hackytrack.build_parser()
+        args = parser.parse_args(
+            [
+                "touch-release",
+                "--detections-jsonl",
+                "primary.jsonl",
+                "--detections-jsonl",
+                "supplemental.jsonl",
+                "--dry-run",
+            ]
+        )
+
+        self.assertEqual(args.func, hackytrack.touch_release)
+        self.assertEqual(args.detections_jsonl, [Path("primary.jsonl"), Path("supplemental.jsonl")])
+
     def test_apply_detector_track_command_is_public(self) -> None:
         parser = hackytrack.build_parser()
         args = parser.parse_args(

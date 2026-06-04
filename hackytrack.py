@@ -1723,6 +1723,15 @@ def release_touch_paths(corpus_dir: Path) -> dict[str, Path]:
     }
 
 
+def release_touch_detection_paths(corpus_dir: Path) -> list[Path]:
+    primary = corpus_dir / "owlv2_touch_detections_v1/detections.jsonl"
+    contact_missing = corpus_dir / "owlv2_touch_detections_contact_missing_v1/detections.jsonl"
+    paths = [primary]
+    if contact_missing.exists():
+        paths.append(contact_missing)
+    return paths
+
+
 def release_summary_from_artifacts(
     *,
     run_dir: Path,
@@ -1914,7 +1923,7 @@ def append_video_id_args(cmd: list[str], video_ids: list[str]) -> None:
 def touch_release(args: argparse.Namespace) -> None:
     corpus_dir = args.corpus_dir.resolve()
     paths = release_touch_paths(corpus_dir)
-    detections = (args.detections_jsonl or paths["detections"]).resolve()
+    detections = [path.resolve() for path in (args.detections_jsonl or release_touch_detection_paths(corpus_dir))]
     out_dir = (args.out_dir or (DEFAULT_RUNS / f"touch-release-{run_id()}")).resolve()
     if out_dir.exists() and any(out_dir.iterdir()) and not args.overwrite:
         raise RuntimeError(f"Output directory already exists and is not empty: {out_dir}. Pass --overwrite to reuse it.")
@@ -1934,10 +1943,10 @@ def touch_release(args: argparse.Namespace) -> None:
             "run_touch_pipeline.py",
             "--corpus-dir",
             str(corpus_dir),
-            "--detections-jsonl",
-            str(detections),
             "--attach-audio-features",
         ]
+        for detection_jsonl in detections:
+            pipeline_cmd.extend(["--detections-jsonl", str(detection_jsonl)])
         if args.import_existing_labels:
             pipeline_cmd.append("--import-existing-labels")
         run_release_step("touch pipeline", pipeline_cmd)
@@ -1954,8 +1963,6 @@ def touch_release(args: argparse.Namespace) -> None:
         str(paths["frozen_events"]),
         "--oof-events",
         str(paths["oof_events"]),
-        "--detections-jsonl",
-        str(detections),
         "--inventory",
         str(paths["inventory"]),
         "--visual-labels-dir",
@@ -1965,6 +1972,8 @@ def touch_release(args: argparse.Namespace) -> None:
         "--extra-non-frozen",
         str(args.extra_non_frozen),
     ]
+    for detection_jsonl in detections:
+        base_render_cmd.extend(["--detections-jsonl", str(detection_jsonl)])
     append_video_id_args(base_render_cmd, selected_video_ids)
     if args.max_seconds is not None:
         base_render_cmd.extend(["--max-seconds", str(args.max_seconds)])
@@ -2415,7 +2424,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     touch_release_parser = sub.add_parser("touch-release", help="Run the v0.1 touch/HUD release readiness workflow")
     touch_release_parser.add_argument("--corpus-dir", type=Path, default=DEFAULT_TOUCH_CORPUS)
-    touch_release_parser.add_argument("--detections-jsonl", type=Path)
+    touch_release_parser.add_argument("--detections-jsonl", type=Path, action="append")
     touch_release_parser.add_argument("--out-dir", type=Path)
     touch_release_parser.add_argument("--touch-overrides", type=Path, default=DEFAULT_TOUCH_OVERRIDES)
     touch_release_parser.add_argument("--video-id", action="append", default=[])

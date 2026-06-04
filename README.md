@@ -87,6 +87,7 @@ Refresh the touch pipeline status from the cached OWLv2 detections:
 ```bash
 python3 run_touch_pipeline.py \
   --detections-jsonl runs/release-27-public/touch_corpus_v1/owlv2_touch_detections_v1/detections.jsonl \
+  --detections-jsonl runs/release-27-public/touch_corpus_v1/owlv2_touch_detections_contact_missing_v1/detections.jsonl \
   --attach-audio-features
 ```
 
@@ -148,7 +149,7 @@ Current v1.0 contact-intelligence status is intentionally split:
 
 | signal | status |
 | --- | --- |
-| touch timing | frozen-test merged event-level gate passes; leave-clips-out CV recall is below gate |
+| touch timing | release-candidate, merged event-level gates pass with the complete OWLv2 detection cache set |
 | HUD touch sparks | release-candidate, OWLv2/L2 anchors, no HSV fallback |
 | reviewed contact badges | manual/label-backed HUD display only |
 | contact type | candidate, passes only on a narrow kick/stall-heavy subset |
@@ -173,10 +174,11 @@ The v0.1 release-readiness report is:
 RELEASE_V0_1_READINESS_REPORT.md
 ```
 
-Current gate status: model-only merged-event touch timing passes frozen test
-(P/R/F1 0.986/0.986/0.986) but fails leave-clips-out CV recall
-(P/R/F1 0.916/0.792/0.849). Visual-corrected frozen HUD verification passes
-video, audio, nonblank-frame, and badge-rendering checks.
+Current gate status: model-only merged-event touch timing passes leave-clips-out
+CV (P/R/F1 0.925/0.896/0.910) and frozen test
+(P/R/F1 0.979/0.986/0.982) when both OWLv2 detection caches are supplied.
+Visual-corrected frozen HUD verification passes video, audio, nonblank-frame,
+and badge-rendering checks.
 
 ## Main Scripts
 
@@ -775,9 +777,8 @@ What works:
 What is still in progress:
 
 - robust automatic footbag tracking across new users' clips
-- broader automatic touch recall; frozen-test event-level timing passes, but
-  leave-clips-out CV still misses too many touches on the hard train/validation
-  clips
+- broader automatic touch robustness; event-level timing passes aggregate gates,
+  but `video-344_singular_display-2` remains the weakest leave-clips-out clip
 - reliable side/contact-type/knee classification; pose/body-proximity and
   visual-crop features are attachable now, and the release contact classifier
   trains, but side and inner/outer surface accuracy are still below gate

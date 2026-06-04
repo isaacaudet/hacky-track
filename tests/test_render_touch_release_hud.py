@@ -12,6 +12,7 @@ from render_touch_release_hud import (
     build_hud_doc_and_anchors,
     labeled_release_events,
     load_touch_overrides,
+    merge_detection_tracks,
 )
 
 
@@ -29,6 +30,24 @@ class RenderTouchReleaseHudTests(unittest.TestCase):
             "split": "train",
             "metadata": {"width": 1000, "height": 500, "duration_sec": 10.0},
         }
+
+    def test_merge_detection_tracks_keeps_supplemental_clip_and_higher_confidence_overlap(self) -> None:
+        primary = {
+            "video-a": [
+                TrackPoint(time_sec=1.0, x=100.0, y=100.0, confidence=0.4),
+                TrackPoint(time_sec=2.0, x=200.0, y=200.0, confidence=0.8),
+            ],
+            "video-b": [],
+        }
+        supplemental = {
+            "video-a": [TrackPoint(time_sec=1.0, x=110.0, y=110.0, confidence=0.9)],
+            "video-b": [TrackPoint(time_sec=3.0, x=300.0, y=300.0, confidence=0.7)],
+        }
+
+        merged = merge_detection_tracks([primary, supplemental], {"video-a", "video-b"})
+
+        self.assertEqual([(p.time_sec, p.x, p.confidence) for p in merged["video-a"]], [(1.0, 110.0, 0.9), (2.0, 200.0, 0.8)])
+        self.assertEqual([(p.time_sec, p.x, p.confidence) for p in merged["video-b"]], [(3.0, 300.0, 0.7)])
 
     def test_reviewed_stall_and_drop_labels_are_rendered_without_touch_count_inflation(self) -> None:
         points = [
