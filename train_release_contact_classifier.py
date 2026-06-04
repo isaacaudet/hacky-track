@@ -168,8 +168,10 @@ CONTACT_FEATURE_MODES = {
     "no_visual_crop": ("visual_",),
     "no_vision_embedding": ("vision_",),
     "no_visual_features": ("visual_", "vision_"),
+    "pose_only": ("__pose_only__",),
 }
-CONTACT_MODEL_FAMILIES = ("logistic_regression", "ridge_classifier", "extra_trees", "gradient_boosting")
+CONTACT_MODEL_FAMILIES = ("logistic_regression", "ridge_classifier", "linear_svc", "extra_trees", "gradient_boosting")
+LINEAR_SVC_FEATURE_MODES = {"no_visual_features", "pose_only"}
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -673,6 +675,7 @@ def is_disabled_feature(key: str, disabled_prefixes: tuple[str, ...]) -> bool:
 
 
 def contact_feature_dict(row: dict[str, Any], *, disabled_prefixes: tuple[str, ...] = ()) -> dict[str, Any]:
+    pose_only = disabled_prefixes == ("__pose_only__",)
     features: dict[str, Any] = {}
     for key in NUMERIC_FEATURES:
         if is_disabled_feature(key, disabled_prefixes):
@@ -703,6 +706,8 @@ def contact_feature_dict(row: dict[str, Any], *, disabled_prefixes: tuple[str, .
         parsed = auto_feature_value(value)
         if parsed is not None:
             features[key] = parsed
+    if pose_only:
+        return {key: value for key, value in features.items() if key.startswith("pose")}
     return features
 
 
@@ -712,6 +717,7 @@ def build_model(model_family: str = "logistic_regression"):
     from sklearn.linear_model import LogisticRegression, RidgeClassifier
     from sklearn.pipeline import make_pipeline
     from sklearn.preprocessing import StandardScaler
+    from sklearn.svm import LinearSVC
 
     if model_family == "logistic_regression":
         return make_pipeline(
@@ -724,6 +730,12 @@ def build_model(model_family: str = "logistic_regression"):
             DictVectorizer(sparse=True),
             StandardScaler(with_mean=False),
             RidgeClassifier(class_weight="balanced"),
+        )
+    if model_family == "linear_svc":
+        return make_pipeline(
+            DictVectorizer(sparse=True),
+            StandardScaler(with_mean=False),
+            LinearSVC(class_weight="balanced", C=0.2, random_state=11, max_iter=50000),
         )
     if model_family == "extra_trees":
         return make_pipeline(
@@ -977,6 +989,17 @@ def train_single_contact_target_best_mode(
     combo_models: dict[str, Any] = {}
     for mode, disabled_prefixes in CONTACT_FEATURE_MODES.items():
         for model_family in CONTACT_MODEL_FAMILIES:
+            if model_family == "linear_svc" and mode not in LINEAR_SVC_FEATURE_MODES:
+                combo_results[f"{mode}/{model_family}"] = {
+                    "status": "not_ready",
+                    "reasons": [
+                        "linear_svc is only evaluated on bounded low-dimensional modes "
+                        f"{sorted(LINEAR_SVC_FEATURE_MODES)}"
+                    ],
+                    "feature_mode": mode,
+                    "model_family": model_family,
+                }
+                continue
             result, model = train_single_contact_target(
                 rows,
                 label_key,
@@ -1003,6 +1026,7 @@ def train_single_contact_target_best_mode(
         model_family = str(result.get("model_family") or "")
         feature_preference = {
             "no_visual_features": 3,
+            "pose_only": 3,
             "no_visual_crop": 2,
             "no_vision_embedding": 1,
             "all_features": 0,
@@ -1010,6 +1034,7 @@ def train_single_contact_target_best_mode(
         model_preference = {
             "logistic_regression": 2,
             "ridge_classifier": 2,
+            "linear_svc": 2,
             "extra_trees": 1,
             "gradient_boosting": 0,
         }.get(model_family, 0)

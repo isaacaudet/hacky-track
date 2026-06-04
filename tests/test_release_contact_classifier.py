@@ -535,11 +535,69 @@ class ReleaseContactClassifierTests(unittest.TestCase):
         self.assertNotIn("vision_embedding_000", features)
         self.assertNotIn("vision_embedding_feature_status", features)
 
+    def test_feature_dict_can_select_pose_only_features(self) -> None:
+        row = {
+            "pose_nearest_foot_dist_px": 12.0,
+            "pose_geometry_nearest_side": "left",
+            "visual_ball_x_norm": 0.3,
+            "trajectory_impulse_score": 5.0,
+            "audio_strength": 2.0,
+        }
+
+        features = contact.contact_feature_dict(row, disabled_prefixes=contact.CONTACT_FEATURE_MODES["pose_only"])
+
+        self.assertIn("pose_nearest_foot_dist_px", features)
+        self.assertIn("pose_geometry_nearest_side", features)
+        self.assertNotIn("visual_ball_x_norm", features)
+        self.assertNotIn("trajectory_impulse_score", features)
+        self.assertNotIn("audio_strength", features)
+
     def test_ridge_classifier_is_available_as_bounded_contact_model_family(self) -> None:
         model = contact.build_model("ridge_classifier")
 
         self.assertIn("ridge_classifier", contact.CONTACT_MODEL_FAMILIES)
         self.assertIsNotNone(model)
+
+    def test_linear_svc_is_available_as_bounded_contact_model_family(self) -> None:
+        model = contact.build_model("linear_svc")
+
+        self.assertIn("linear_svc", contact.CONTACT_MODEL_FAMILIES)
+        self.assertIsNotNone(model)
+
+    def test_linear_svc_search_is_limited_to_bounded_feature_modes(self) -> None:
+        rows = []
+        for video_id in ("video-a", "video-b", "video-c"):
+            rows.extend(
+                [
+                    {
+                        "video_id": video_id,
+                        "candidate_time_sec": 1.0,
+                        "contact_side": "left",
+                        "contact_side_basis": "wearer_limb",
+                        "pose_nearest_lower_part": "left_big_toe",
+                        "pose_nearest_foot_dist_px": 8.0,
+                    },
+                    {
+                        "video_id": video_id,
+                        "candidate_time_sec": 2.0,
+                        "contact_side": "right",
+                        "contact_side_basis": "wearer_limb",
+                        "pose_nearest_lower_part": "right_big_toe",
+                        "pose_nearest_foot_dist_px": 8.0,
+                    },
+                ]
+            )
+
+        result, _model = contact.train_single_contact_target_best_mode(
+            rows,
+            "contact_side",
+            min_examples=2,
+            min_videos=2,
+        )
+
+        self.assertEqual(result["model_mode_results"]["all_features/linear_svc"]["status"], "not_ready")
+        self.assertIn("no_visual_features/linear_svc", result["model_mode_results"])
+        self.assertEqual(result["model_mode_results"]["no_visual_features/linear_svc"]["status"], "trained")
 
     def test_ridge_classifier_confidence_uses_decision_margin(self) -> None:
         model = contact.build_model("ridge_classifier")

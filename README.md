@@ -153,8 +153,8 @@ Current v1.0 contact-intelligence status is intentionally split:
 | HUD touch sparks | release-candidate, OWLv2/L2 anchors, no HSV fallback |
 | reviewed contact badges | manual/label-backed HUD display only |
 | contact type | candidate, raw kick/stall accuracy reaches 0.963, balanced accuracy 0.786; release-scope fails without enough stall/knee/drop labels |
-| left/right side | candidate, below release gate at 0.750 raw / 0.691 balanced accuracy |
-| inner/outer surface | candidate, below release gate at 0.760 raw / 0.615 balanced accuracy |
+| left/right side | candidate, below release gate at 0.776 raw / 0.752 balanced accuracy |
+| inner/outer surface | candidate, below release gate at 0.800 raw / 0.643 balanced accuracy |
 | automatic drop/floor reset | evaluated candidate, fails gate at 0.682 precision / 0.714 recall after rally-sequence reset features |
 | automatic stall | not ready; only 3 approved stall examples in the existing reviewed reset/stall corpus |
 
@@ -801,9 +801,9 @@ What is still in progress:
   but `video-344_singular_display-2` remains the weakest leave-clips-out clip
 - reliable side/contact-type/knee classification; pose/body-proximity and
   visual-crop features are attachable now, and the release contact classifier
-  trains, but side and inner/outer surface accuracy are still below gate; fresh
-  pose-cache completion helped contact type slightly and did not solve side or
-  surface
+  trains, but side and inner/outer surface accuracy are still below gate;
+  LinearSVC/pose-only model selection improved them without promoting automatic
+  badges
 - automatic stall/drop detection; release HUD can render reviewed stall/drop
   labels, and the separate reset/stall audit now has full OWLv2/L2 coverage,
   but automatic drop still fails gate even after score-threshold diagnostics,

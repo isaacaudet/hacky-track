@@ -51,8 +51,8 @@ Clip-disjoint leave-one-video-out results:
 | target | accuracy | balanced accuracy | gate | selected feature mode | interpretation |
 | --- | ---: | ---: | --- | --- | --- |
 | contact type | 0.963 | 0.786 | raw pass / release-scope fail | no_visual_crop + ridge classifier | Fresh pose-cache completion removes one kick/stall error, but stall recall is still only 0.571 and class coverage blocks full v1.0: stall 7, knee 0, drop_floor 0. |
-| side | 0.750 | 0.691 | fail | no_visual_crop + gradient boosting | Accuracy remains 0.750 after fresh pose-cache completion; still below the 0.85 side gate. |
-| surface | 0.760 | 0.615 | fail | no_visual_crop + logistic regression | Accuracy remains 0.760; still below gate and label-limited. |
+| side | 0.776 | 0.752 | fail | no_visual_features + linear SVC | Bounded LinearSVC improves side over the prior 0.750 result and raises left recall to 0.680, but still misses the 0.85 side gate. |
+| surface | 0.800 | 0.643 | fail | pose_only + gradient boosting | Pose-only surface model improves raw surface accuracy to 0.800, but inner recall remains 0.286 and the target is still label-limited. |
 
 Release label gaps from the current reviewed event files:
 
@@ -71,14 +71,14 @@ Feature-mode ablation:
 | target | current best | balanced accuracy | prior logistic baseline | result |
 | --- | ---: | ---: | ---: | --- |
 | contact type | 0.963 | 0.786 | 0.902 | Ridge classifier remains strongest on the current kick/stall set, but release-scope coverage is still missing stall/knee/drop labels. |
-| side | 0.750 | 0.691 | 0.628 | Fresh pose-cache completion changes the selected family but not the raw side accuracy; side remains a semantic/egocentric-foot-identity problem. |
-| surface | 0.760 | 0.615 | 0.760 | Current features do not rescue the 7-inner-row surface set; inner recall remains 0.286. |
+| side | 0.776 | 0.752 | 0.628 | LinearSVC on non-visual scalar features is the best current side model; it improves accuracy but not enough for promotion. |
+| surface | 0.800 | 0.643 | 0.760 | Pose-only gradient boosting is the best current surface model; it fixes one outer error but still cannot learn inner from 7 rows. |
 
 Confidence/abstention does not rescue the failing targets:
 
-- Side stays below gate; the selected model reaches 0.750 full coverage / 0.691 balanced accuracy, but high-confidence abstention does not rescue it.
+- Side stays below gate; the selected model reaches 0.776 full coverage / 0.752 balanced accuracy. High-confidence abstention reaches 0.857 only at 27.6% coverage, too sparse for automatic HUD promotion.
 - All current approved/training side labels are now `wearer_limb`, inferred from the side-specific trick labels you already reviewed.
-- Surface stays below gate; selected model is 0.760 raw / 0.615 balanced accuracy and remains below 0.85 under confidence filtering.
+- Surface stays below gate; selected model is 0.800 raw / 0.643 balanced accuracy and remains label-limited below release scope.
 - Contact type has a raw accuracy pass, but the new release-scope gate correctly keeps it unpromoted until stall/knee/drop_floor class coverage reaches the release floor.
 
 ### Pose / Body Proximity
@@ -160,12 +160,12 @@ Current error buckets:
 
 | bucket | count | meaning |
 | --- | ---: | --- |
-| side_visual_ambiguity | 7 | Image crop/embedding still cannot infer side reliably. |
 | pose_missing | 6 | Pose unavailable at contact time. |
 | pose_side_disagreement | 6 | Pose side conflicts with the reviewed side. |
-| pose_surface_disagreement | 3 | Pose foot-edge geometry conflicts with reviewed surface. |
+| side_visual_ambiguity | 5 | Image crop/embedding still cannot infer side reliably. |
 | surface_label_or_geometry_ambiguity | 3 | Inner/outer needs more labels despite embedding gains. |
 | type_motion_ambiguity | 3 | Mostly stall/kick errors; needs dwell/control features and more stall labels. |
+| pose_surface_disagreement | 2 | Pose foot-edge geometry conflicts with reviewed surface. |
 
 Representative strips are rendered under:
 
@@ -288,7 +288,7 @@ python3 -m unittest discover tests
 Current result:
 
 ```text
-Ran 281 tests in 7.469s
+Ran 284 tests in 10.559s
 OK
 ```
 
@@ -320,8 +320,8 @@ Do not render these as product facts until the gate passes.
 
 | signal | minimum labels | release gate | current state |
 | --- | ---: | --- | --- |
-| left/right side | >=20 explicit wearer-limb labels per promoted class, >=3 videos | >=85% clip-disjoint side accuracy | 76 wearer-limb rows, 0.750 raw / 0.691 balanced accuracy, fail |
-| inner/outer surface | >=20 per promoted class, >=3 videos | >=85% clip-disjoint surface accuracy | 25 rows, 0.760 raw / 0.615 balanced accuracy, fail; needs +13 inner and +2 outer labels for release-scope coverage |
+| left/right side | >=20 explicit wearer-limb labels per promoted class, >=3 videos | >=85% clip-disjoint side accuracy | 76 wearer-limb rows, 0.776 raw / 0.752 balanced accuracy, fail |
+| inner/outer surface | >=20 per promoted class, >=3 videos | >=85% clip-disjoint surface accuracy | 25 rows, 0.800 raw / 0.643 balanced accuracy, fail; needs +13 inner and +2 outer labels for release-scope coverage |
 | contact type: kick/knee/stall/drop | >=20 per promoted class, >=3 videos | >=85% contact-type accuracy | 82 rows, 0.963 raw / 0.786 balanced accuracy, release-scope fail: stall 7, knee 0, drop_floor 0 |
 | drop/floor reset | enough reviewed positives and negatives across clips | precision >=90%, recall >=90% | 35 clean reviewed reset rows, 0.682 P / 0.714 R after rally-sequence reset features, fail |
 | stall | enough reviewed stall windows and non-stall controls | precision >=85%, recall >=80% | 32 clean reviewed stall candidates, but only 3 approved stalls, not-ready |
@@ -329,7 +329,10 @@ Do not render these as product facts until the gate passes.
 
 ## Next Engineering Work
 
-The next high-yield work is not more scalar pose tweaks. The frozen embedding branch helped surface but did not solve side, so the remaining work is better labels plus a side-specific egocentric foot-identity strategy.
+The next high-yield work is not more broad scalar model search. LinearSVC and
+pose-only feature selection bought a small held-out lift, but both side and
+surface remain below gate, so the remaining work is better labels plus a
+side-specific egocentric foot-identity strategy.
 
 1. Improve side semantics:
    - The audit shows current labels are not explained by a single pose-side or screen-side convention.

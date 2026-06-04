@@ -209,8 +209,8 @@ clip-disjoint contact metrics are:
 | target | rows | selected model | raw / balanced accuracy | gate |
 | --- | ---: | --- | ---: | --- |
 | contact type | 82 | ridge classifier, no visual crop | 0.963 / 0.786 | raw pass; release-scope fail until stall/knee/drop labels reach the floor |
-| wearer side | 76 | gradient boosting, no visual crop | 0.750 / 0.691 | fail |
-| inner/outer surface | 25 | logistic regression, no visual crop | 0.760 / 0.615 | fail |
+| wearer side | 76 | LinearSVC, no visual features | 0.776 / 0.752 | fail |
+| inner/outer surface | 25 | gradient boosting, pose only | 0.800 / 0.643 | fail |
 | drop/floor reset | 35 | ExtraTrees over OWLv2/L2 + floor/context + merged-touch gap features | 0.682 P / 0.714 R | fail |
 | stall | 32 | n/a | n/a | not ready: 3 approved stalls |
 
@@ -344,7 +344,7 @@ python3 -m unittest \
   tests.test_release_event_error_audit
 ```
 
-Current result: `281` tests pass.
+Current result: `284` tests pass.
 
 ## Remaining Risks
 
@@ -366,5 +366,5 @@ Current result: `281` tests pass.
 
 1. Improve the trajectory layer on `video-344_singular_display-2` before adding new classifier complexity.
 2. Add a compact indexed detector-track cache so full pipeline refreshes do not rescan the full OWLv2 JSONL each run.
-3. Keep pose/body proximity as a soft diagnostic feature until it demonstrates held-out lift; fresh pose-cache completion improved contact type only.
+3. Keep pose/body proximity as a soft diagnostic feature; pose-only surface modeling helps, but the gate still needs more inner/outer labels and better foot identity.
 4. Only after touch timing is stable, resume side/contact-type classification.
