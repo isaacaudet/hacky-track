@@ -209,13 +209,14 @@ clip-disjoint contact metrics are:
 | target | rows | selected model | raw / balanced accuracy | gate |
 | --- | ---: | --- | ---: | --- |
 | contact type | 82 | ridge classifier, no visual crop | 0.963 / 0.786 | raw pass; release-scope fail until stall/knee/drop labels reach the floor |
-| wearer side | 76 | LinearSVC, no visual features | 0.776 / 0.752 | fail |
+| wearer side | 76 | LinearSVC, no visual features; diagnostic temporal smoothing | 0.776 / 0.752 raw, 0.816 / 0.791 smoothed | fail; smoothing remains diagnostic-only |
 | inner/outer surface | 25 | gradient boosting, pose only | 0.800 / 0.643 | fail |
 | drop/floor reset | 35 | ExtraTrees over OWLv2/L2 + floor/context + merged-touch gap features | 0.682 P / 0.714 R | fail |
 | stall | 32 | n/a | n/a | not ready: 3 approved stalls |
 
 The contact classifier report now includes the exact label inventory and release
 gaps: side has enough left/right count coverage but still fails accuracy;
+diagnostic temporal smoothing improves side but still misses the 0.85 gate;
 surface needs +13 inner and +2 outer labels; full contact type needs +13 stall,
 +20 knee, and +20 drop_floor labels before automatic HUD badges can be promoted.
 
@@ -355,6 +356,7 @@ Current result: `284` tests pass.
 - A model-only touch-stream ablation increases reset/stall stream coverage to 27 videos, but worsens drop to 0.652/0.714 P/R, so it remains diagnostic-only.
 - Drop/floor reset score-threshold diagnostics do not rescue the gate: the best F1 threshold is 0.35 with 0.667 precision / 0.952 recall, so the blocker is feature separability, not the default 0.5 threshold.
 - Reviewed contact badges are manual display facts; automatic side/surface badges remain blocked by failed contact gates.
+- Diagnostic side sequence smoothing improves held-out side from 0.776/0.752 to 0.816/0.791, but it is still below the 0.85 gate and is not used for automatic HUD badges.
 - Candidate-level CV still fails; the release pass depends on merged event-level output, which is the intended product output.
 - `video-344_singular_display-2` remains the weakest leave-one-video-out clip. Its remaining misses are mostly weak trajectory impulse, touch/stall overlap, or low classifier score.
 - The release command must include both OWLv2 detection JSONLs above; omitting the contact-missing cache removes trajectory features for `video-340_singular_display-2` and reproduces the old recall failure.

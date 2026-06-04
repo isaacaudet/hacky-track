@@ -51,7 +51,7 @@ Clip-disjoint leave-one-video-out results:
 | target | accuracy | balanced accuracy | gate | selected feature mode | interpretation |
 | --- | ---: | ---: | --- | --- | --- |
 | contact type | 0.963 | 0.786 | raw pass / release-scope fail | no_visual_crop + ridge classifier | Fresh pose-cache completion removes one kick/stall error, but stall recall is still only 0.571 and class coverage blocks full v1.0: stall 7, knee 0, drop_floor 0. |
-| side | 0.776 | 0.752 | fail | no_visual_features + linear SVC | Bounded LinearSVC improves side over the prior 0.750 result and raises left recall to 0.680, but still misses the 0.85 side gate. |
+| side | 0.776 raw; 0.816 smoothed diagnostic | 0.752 raw; 0.791 smoothed diagnostic | fail | no_visual_features + linear SVC; temporal sequence smoothing | Bounded LinearSVC improves side over the prior 0.750 result, and diagnostic sequence smoothing fixes 3 more held-out side rows, but still misses the 0.85 side gate and remains unpromoted. |
 | surface | 0.800 | 0.643 | fail | pose_only + gradient boosting | Pose-only surface model improves raw surface accuracy to 0.800, but inner recall remains 0.286 and the target is still label-limited. |
 
 Release label gaps from the current reviewed event files:
@@ -71,12 +71,12 @@ Feature-mode ablation:
 | target | current best | balanced accuracy | prior logistic baseline | result |
 | --- | ---: | ---: | ---: | --- |
 | contact type | 0.963 | 0.786 | 0.902 | Ridge classifier remains strongest on the current kick/stall set, but release-scope coverage is still missing stall/knee/drop labels. |
-| side | 0.776 | 0.752 | 0.628 | LinearSVC on non-visual scalar features is the best current side model; it improves accuracy but not enough for promotion. |
+| side | 0.776 raw; 0.816 smoothed diagnostic | 0.752 raw; 0.791 smoothed diagnostic | 0.628 | LinearSVC on non-visual scalar features is the best current side model; sequence smoothing is a useful diagnostic lift but still not enough for promotion. |
 | surface | 0.800 | 0.643 | 0.760 | Pose-only gradient boosting is the best current surface model; it fixes one outer error but still cannot learn inner from 7 rows. |
 
 Confidence/abstention does not rescue the failing targets:
 
-- Side stays below gate; the selected model reaches 0.776 full coverage / 0.752 balanced accuracy. High-confidence abstention reaches 0.857 only at 27.6% coverage, too sparse for automatic HUD promotion.
+- Side stays below gate; the selected model reaches 0.776 full coverage / 0.752 balanced accuracy. Diagnostic temporal smoothing improves the same held-out rows to 0.816 / 0.791 by changing 9 rows, but it still misses the 0.85 release gate and is not used for automatic HUD promotion. High-confidence abstention reaches 0.857 only at 27.6% coverage, too sparse for automatic HUD promotion.
 - All current approved/training side labels are now `wearer_limb`, inferred from the side-specific trick labels you already reviewed.
 - Surface stays below gate; selected model is 0.800 raw / 0.643 balanced accuracy and remains label-limited below release scope.
 - Contact type has a raw accuracy pass, but the new release-scope gate correctly keeps it unpromoted until stall/knee/drop_floor class coverage reaches the release floor.
@@ -246,7 +246,8 @@ Code changes:
 - `run_touch_pipeline.py` can attach visual crop features via `--attach-visual-crop-features` and reports their status.
 - `run_touch_pipeline.py` can attach OWLv2 crop embeddings via `--attach-vision-embedding-features` and reports their status.
 - `train_release_contact_classifier.py` now evaluates feature modes per target and stores selected target-specific modes in the model artifact.
-- `train_release_contact_classifier.py` now evaluates bounded model families per target (`logistic_regression`, `extra_trees`, `gradient_boosting`) and stores the selected family in the model artifact.
+- `train_release_contact_classifier.py` now evaluates bounded model families per target (`logistic_regression`, `ridge_classifier`, `linear_svc`, `extra_trees`, `gradient_boosting`) and stores the selected family in the model artifact.
+- `train_release_contact_classifier.py` now reports diagnostic temporal smoothing for side sequences; it improves held-out side accuracy but remains unpromoted until the 0.85 gate clears.
 - `train_release_contact_classifier.py` now reports selective accuracy by prediction confidence, so abstention claims are measurable.
 - `train_release_contact_classifier.py` now reports balanced accuracy/per-class recall and uses balanced accuracy as a tie-breaker when raw leave-one-video-out accuracy is equal.
 - `train_release_contact_classifier.py` now separates raw accuracy gates from release-scope gates, so kick/stall accuracy cannot be promoted as full kick/knee/stall/drop intelligence until class coverage exists.
@@ -320,7 +321,7 @@ Do not render these as product facts until the gate passes.
 
 | signal | minimum labels | release gate | current state |
 | --- | ---: | --- | --- |
-| left/right side | >=20 explicit wearer-limb labels per promoted class, >=3 videos | >=85% clip-disjoint side accuracy | 76 wearer-limb rows, 0.776 raw / 0.752 balanced accuracy, fail |
+| left/right side | >=20 explicit wearer-limb labels per promoted class, >=3 videos | >=85% clip-disjoint side accuracy | 76 wearer-limb rows, 0.776 raw / 0.752 balanced accuracy; sequence-smoothed diagnostic 0.816 / 0.791, fail |
 | inner/outer surface | >=20 per promoted class, >=3 videos | >=85% clip-disjoint surface accuracy | 25 rows, 0.800 raw / 0.643 balanced accuracy, fail; needs +13 inner and +2 outer labels for release-scope coverage |
 | contact type: kick/knee/stall/drop | >=20 per promoted class, >=3 videos | >=85% contact-type accuracy | 82 rows, 0.963 raw / 0.786 balanced accuracy, release-scope fail: stall 7, knee 0, drop_floor 0 |
 | drop/floor reset | enough reviewed positives and negatives across clips | precision >=90%, recall >=90% | 35 clean reviewed reset rows, 0.682 P / 0.714 R after rally-sequence reset features, fail |
@@ -330,9 +331,10 @@ Do not render these as product facts until the gate passes.
 ## Next Engineering Work
 
 The next high-yield work is not more broad scalar model search. LinearSVC and
-pose-only feature selection bought a small held-out lift, but both side and
-surface remain below gate, so the remaining work is better labels plus a
-side-specific egocentric foot-identity strategy.
+pose-only feature selection and side sequence smoothing bought small held-out
+lifts, but both side and surface remain below gate. The remaining work is
+better inner/outer/stall/knee/drop coverage plus a side-specific egocentric
+foot-identity strategy.
 
 1. Improve side semantics:
    - The audit shows current labels are not explained by a single pose-side or screen-side convention.

@@ -599,6 +599,73 @@ class ReleaseContactClassifierTests(unittest.TestCase):
         self.assertIn("no_visual_features/linear_svc", result["model_mode_results"])
         self.assertEqual(result["model_mode_results"]["no_visual_features/linear_svc"]["status"], "trained")
 
+    def test_side_sequence_priors_can_smooth_isolated_flip(self) -> None:
+        train_rows = [
+            {"video_id": "train-a", "candidate_time_sec": 1.0, "contact_side": "right"},
+            {"video_id": "train-a", "candidate_time_sec": 2.0, "contact_side": "right"},
+            {"video_id": "train-a", "candidate_time_sec": 3.0, "contact_side": "right"},
+            {"video_id": "train-b", "candidate_time_sec": 1.0, "contact_side": "left"},
+            {"video_id": "train-b", "candidate_time_sec": 2.0, "contact_side": "left"},
+            {"video_id": "train-b", "candidate_time_sec": 3.0, "contact_side": "left"},
+        ]
+
+        init, transitions = contact.sequence_transition_priors(
+            train_rows,
+            "contact_side",
+            states=contact.CONTACT_SIDE_SEQUENCE_STATES,
+            alpha=1.0,
+        )
+        smoothed = contact.viterbi_smooth_sequence(
+            ["right", "left", "right"],
+            [0.6, 0.6, 0.6],
+            init=init,
+            transitions=transitions,
+            states=contact.CONTACT_SIDE_SEQUENCE_STATES,
+            emission_temperature=1.0,
+            transition_weight=1.0,
+        )
+
+        self.assertEqual(smoothed, ["right", "right", "right"])
+
+    def test_contact_side_training_reports_sequence_smoothing_diagnostic_only(self) -> None:
+        rows = []
+        for video_id in ("video-a", "video-b", "video-c"):
+            rows.extend(
+                [
+                    {
+                        "video_id": video_id,
+                        "candidate_time_sec": 2.0,
+                        "contact_side": "right",
+                        "contact_side_basis": "wearer_limb",
+                        "pose_nearest_lower_part": "right_big_toe",
+                        "pose_nearest_foot_dist_px": 8.0,
+                    },
+                    {
+                        "video_id": video_id,
+                        "candidate_time_sec": 1.0,
+                        "contact_side": "left",
+                        "contact_side_basis": "wearer_limb",
+                        "pose_nearest_lower_part": "left_big_toe",
+                        "pose_nearest_foot_dist_px": 8.0,
+                    },
+                ]
+            )
+
+        result, _model = contact.train_single_contact_target(
+            rows,
+            "contact_side",
+            min_examples=2,
+            min_videos=2,
+            feature_mode="no_visual_features",
+            disabled_prefixes=contact.CONTACT_FEATURE_MODES["no_visual_features"],
+            model_family="logistic_regression",
+        )
+
+        self.assertEqual(result["status"], "trained")
+        self.assertEqual(result["sequence_smoothed"]["status"], "diagnostic_only")
+        self.assertEqual(result["sequence_smoothed"]["rows"], result["rows"])
+        self.assertIn("automatic HUD side badges", result["sequence_smoothed"]["note"])
+
     def test_ridge_classifier_confidence_uses_decision_margin(self) -> None:
         model = contact.build_model("ridge_classifier")
         features = [{"x": -2.0}, {"x": -1.0}, {"x": 1.0}, {"x": 2.0}]

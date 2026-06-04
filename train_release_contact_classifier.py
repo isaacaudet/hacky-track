@@ -172,6 +172,12 @@ CONTACT_FEATURE_MODES = {
 }
 CONTACT_MODEL_FAMILIES = ("logistic_regression", "ridge_classifier", "linear_svc", "extra_trees", "gradient_boosting")
 LINEAR_SVC_FEATURE_MODES = {"no_visual_features", "pose_only"}
+CONTACT_SIDE_SEQUENCE_STATES = ("left", "right")
+CONTACT_SIDE_SEQUENCE_SMOOTHING = {
+    "alpha": 1.0,
+    "emission_temperature": 1.0,
+    "transition_weight": 1.0,
+}
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -830,6 +836,112 @@ def selective_accuracy_rows(predictions: list[dict[str, Any]], thresholds: tuple
     return rows
 
 
+def sequence_transition_priors(
+    rows: list[dict[str, Any]],
+    label_key: str,
+    *,
+    states: tuple[str, ...],
+    alpha: float,
+) -> tuple[dict[str, float], dict[str, dict[str, float]]]:
+    init_counts: Counter[str] = Counter()
+    transition_counts: dict[str, Counter[str]] = {state: Counter() for state in states}
+    for video_id in sorted({str(row.get("video_id")) for row in rows}):
+        sequence = [
+            str(row[label_key])
+            for row in sorted(
+                (row for row in rows if str(row.get("video_id")) == video_id and str(row.get(label_key)) in states),
+                key=lambda item: float(item.get("candidate_time_sec") or 0.0),
+            )
+        ]
+        if not sequence:
+            continue
+        init_counts[sequence[0]] += 1
+        for prior, current in zip(sequence, sequence[1:]):
+            transition_counts[prior][current] += 1
+    init_total = sum(init_counts.values()) + alpha * len(states)
+    init = {state: (init_counts[state] + alpha) / init_total for state in states}
+    transitions: dict[str, dict[str, float]] = {}
+    for prior in states:
+        denom = sum(transition_counts[prior].values()) + alpha * len(states)
+        transitions[prior] = {
+            current: (transition_counts[prior][current] + alpha) / denom
+            for current in states
+        }
+    return init, transitions
+
+
+def confidence_emission_probs(
+    *,
+    prediction: str,
+    confidence: float,
+    states: tuple[str, ...],
+    temperature: float,
+) -> dict[str, float]:
+    clipped = max(0.501, min(0.999, float(confidence)))
+    if temperature <= 0:
+        temperature = 1.0
+    logit = math.log(clipped / (1.0 - clipped)) * temperature
+    adjusted = 1.0 / (1.0 + math.exp(-logit))
+    other = (1.0 - adjusted) / max(1, len(states) - 1)
+    return {state: adjusted if state == prediction else other for state in states}
+
+
+def viterbi_smooth_sequence(
+    predictions: list[str],
+    confidences: list[float],
+    *,
+    init: dict[str, float],
+    transitions: dict[str, dict[str, float]],
+    states: tuple[str, ...],
+    emission_temperature: float,
+    transition_weight: float,
+) -> list[str]:
+    if not predictions:
+        return []
+    dp: list[dict[str, float]] = []
+    back: list[dict[str, str | None]] = []
+    for index, (prediction, confidence) in enumerate(zip(predictions, confidences)):
+        emissions = confidence_emission_probs(
+            prediction=prediction,
+            confidence=confidence,
+            states=states,
+            temperature=emission_temperature,
+        )
+        if index == 0:
+            dp.append(
+                {
+                    state: math.log(max(1e-12, init[state])) + math.log(max(1e-12, emissions[state]))
+                    for state in states
+                }
+            )
+            back.append({state: None for state in states})
+            continue
+        current_scores: dict[str, float] = {}
+        current_back: dict[str, str | None] = {}
+        for state in states:
+            candidates = []
+            for prior in states:
+                score = (
+                    dp[-1][prior]
+                    + transition_weight * math.log(max(1e-12, transitions[prior][state]))
+                    + math.log(max(1e-12, emissions[state]))
+                )
+                candidates.append((score, prior))
+            best_score, best_prior = max(candidates, key=lambda item: item[0])
+            current_scores[state] = best_score
+            current_back[state] = best_prior
+        dp.append(current_scores)
+        back.append(current_back)
+    final_state = max(states, key=lambda state: dp[-1][state])
+    sequence = [final_state]
+    for index in range(len(predictions) - 1, 0, -1):
+        prior = back[index][sequence[-1]]
+        if prior is None:
+            break
+        sequence.append(prior)
+    return list(reversed(sequence))
+
+
 def train_single_contact_target(
     rows: list[dict[str, Any]],
     label_key: str,
@@ -864,11 +976,15 @@ def train_single_contact_target(
         )
 
     predictions: list[dict[str, Any]] = []
+    sequence_predictions: list[dict[str, Any]] = []
     folds: list[dict[str, Any]] = []
     skipped_folds: list[dict[str, Any]] = []
     for video_id in videos:
         train = [row for row in labeled if str(row.get("video_id")) != video_id]
-        test = [row for row in labeled if str(row.get("video_id")) == video_id]
+        test = sorted(
+            (row for row in labeled if str(row.get("video_id")) == video_id),
+            key=lambda row: float(row.get("candidate_time_sec") or 0.0),
+        )
         train_labels = [str(row[label_key]) for row in train]
         if len(set(train_labels)) < 2:
             skipped_folds.append({"video_id": video_id, "rows": len(test), "reason": "training fold has one class"})
@@ -880,6 +996,23 @@ def train_single_contact_target(
         test_labels = [str(row[label_key]) for row in test]
         fold_preds = [str(value) for value in model.predict(test_features)]
         fold_confidences = prediction_confidences(model, test_features)
+        fold_sequence_preds: list[str] | None = None
+        if label_key == "contact_side":
+            init, transitions = sequence_transition_priors(
+                train,
+                label_key,
+                states=CONTACT_SIDE_SEQUENCE_STATES,
+                alpha=float(CONTACT_SIDE_SEQUENCE_SMOOTHING["alpha"]),
+            )
+            fold_sequence_preds = viterbi_smooth_sequence(
+                fold_preds,
+                fold_confidences,
+                init=init,
+                transitions=transitions,
+                states=CONTACT_SIDE_SEQUENCE_STATES,
+                emission_temperature=float(CONTACT_SIDE_SEQUENCE_SMOOTHING["emission_temperature"]),
+                transition_weight=float(CONTACT_SIDE_SEQUENCE_SMOOTHING["transition_weight"]),
+            )
         fold_correct = sum(1 for label, pred in zip(test_labels, fold_preds) if label == pred)
         folds.append(
             {
@@ -901,6 +1034,19 @@ def train_single_contact_target(
                     "correct": label == pred,
                 }
             )
+        if fold_sequence_preds is not None:
+            for row, label, pred, raw_pred, confidence in zip(test, test_labels, fold_sequence_preds, fold_preds, fold_confidences):
+                sequence_predictions.append(
+                    {
+                        "video_id": row.get("video_id"),
+                        "candidate_time_sec": row.get("candidate_time_sec"),
+                        "label": label,
+                        "prediction": pred,
+                        "raw_prediction": raw_pred,
+                        "confidence": round(confidence, 6),
+                        "correct": label == pred,
+                    }
+                )
 
     if not predictions:
         return (
@@ -971,6 +1117,29 @@ def train_single_contact_target(
         "skipped_folds": skipped_folds,
         "errors": [row for row in predictions if not row["correct"]][:50],
     }
+    if sequence_predictions:
+        sequence_quality = classification_quality(
+            (row["label"] for row in sequence_predictions),
+            (row["prediction"] for row in sequence_predictions),
+        )
+        result["sequence_smoothed"] = {
+            "status": "diagnostic_only",
+            "note": (
+                "Temporal smoothing is evaluated on leave-one-video-out side predictions only; "
+                "automatic HUD side badges remain blocked unless the release gate passes."
+            ),
+            "params": dict(CONTACT_SIDE_SEQUENCE_SMOOTHING),
+            "states": list(CONTACT_SIDE_SEQUENCE_STATES),
+            "accuracy": sequence_quality["accuracy"],
+            "balanced_accuracy": sequence_quality["balanced_accuracy"],
+            "per_class_recall": sequence_quality["per_class_recall"],
+            "confusion": sequence_quality["confusion"],
+            "rows": len(sequence_predictions),
+            "prediction_counts": dict(Counter(row["prediction"] for row in sequence_predictions)),
+            "changed_rows": sum(1 for row in sequence_predictions if row["prediction"] != row["raw_prediction"]),
+            "improves_raw_accuracy": (sequence_quality["accuracy"] or 0.0) > accuracy,
+            "errors": [row for row in sequence_predictions if not row["correct"]][:50],
+        }
     if side_basis_counts is not None:
         result["side_basis_counts"] = side_basis_counts
         result["explicit_wearer_limb_rows"] = explicit_wearer_limb_rows
@@ -1249,6 +1418,14 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
                     lines.append(f"- Leave-one-video-out balanced accuracy: `{result.get('balanced_accuracy'):.3f}`")
                 lines.append(f"- Gate: `{result.get('gate')}` at >= `{result.get('gate_accuracy_threshold')}`")
                 lines.append(f"- Release-scope gate: `{result.get('release_scope_gate')}`")
+                if result.get("sequence_smoothed"):
+                    smoothed = result["sequence_smoothed"]
+                    lines.append(
+                        f"- Sequence-smoothed side diagnostic: accuracy `{smoothed.get('accuracy'):.3f}`, "
+                        f"balanced `{smoothed.get('balanced_accuracy'):.3f}`, "
+                        f"changed rows `{smoothed.get('changed_rows')}`"
+                    )
+                    lines.append(f"- Sequence-smoothed side status: `{smoothed.get('status')}`; automatic side badges remain unpromoted.")
                 for blocker in result.get("gate_blockers") or []:
                     lines.append(f"- Gate blocker: {blocker}")
                 if result.get("release_scope_blockers"):
