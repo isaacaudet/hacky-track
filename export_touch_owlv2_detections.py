@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -125,10 +126,15 @@ def detect_frames(
     detector: Callable[[np.ndarray], list[dict[str, float]]],
     threshold: float,
     max_frames: int | None = None,
+    progress_every: int = 0,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     records: list[dict[str, Any]] = []
     per_video = []
     remaining = max_frames
+    processed = 0
+    total_planned = sum(len(item["frame_indexes"]) for item in plan.values())
+    if max_frames is not None:
+        total_planned = min(total_planned, max_frames)
     for video_name, item in sorted(plan.items()):
         frame_indexes = list(item["frame_indexes"])
         if remaining is not None:
@@ -146,6 +152,14 @@ def detect_frames(
                 continue
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             detections = detector(rgb)
+            processed += 1
+            if progress_every and processed % progress_every == 0:
+                print(
+                    f"owlv2 export progress: {processed}/{total_planned} frames "
+                    f"({video_name} frame {frame_index})",
+                    file=sys.stderr,
+                    flush=True,
+                )
             records.append(
                 {
                     "source_video": video_name,
@@ -196,7 +210,13 @@ def export_detections(args: argparse.Namespace, detector: Callable[[np.ndarray],
         detect_summary = {"videos": [{**{k: v for k, v in item.items() if k != "frame_indexes"}, "frames_planned": len(item["frame_indexes"]), "frames_exported": 0} for item in plan.values()], "frames_exported": 0}
     else:
         assert detector is not None
-        records, detect_summary = detect_frames(plan, detector=detector, threshold=args.threshold, max_frames=args.max_frames)
+        records, detect_summary = detect_frames(
+            plan,
+            detector=detector,
+            threshold=args.threshold,
+            max_frames=args.max_frames,
+            progress_every=getattr(args, "progress_every", 0),
+        )
 
     out_dir.mkdir(parents=True, exist_ok=True)
     write_jsonl(output_jsonl, records)
@@ -237,6 +257,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seconds-after", type=float, default=1.0)
     parser.add_argument("--frame-stride", type=int, default=1)
     parser.add_argument("--max-frames", type=int)
+    parser.add_argument("--progress-every", type=int, default=100, help="print detector progress every N exported frames; 0 disables")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true")
     return parser.parse_args()

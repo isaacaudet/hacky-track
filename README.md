@@ -155,6 +155,8 @@ Current v1.0 contact-intelligence status is intentionally split:
 | contact type | candidate, raw kick/stall accuracy passes but release-scope fails without enough stall/knee/drop labels |
 | left/right side | candidate, below release gate |
 | inner/outer surface | candidate, below release gate |
+| automatic drop/floor reset | evaluated candidate, fails gate at 0.609 precision / 0.667 recall after full OWLv2/L2 coverage |
+| automatic stall | not ready; only 3 approved stall examples in the existing reviewed reset/stall corpus |
 
 The release-candidate report is:
 
@@ -783,7 +785,8 @@ What is still in progress:
   visual-crop features are attachable now, and the release contact classifier
   trains, but side and inner/outer surface accuracy are still below gate
 - automatic stall/drop detection; release HUD can render reviewed stall/drop
-  labels, but the OWLv2 release path does not infer them yet
+  labels, and the separate reset/stall audit now has full OWLv2/L2 coverage,
+  but automatic drop still fails gate and stall remains label-limited
 - higher-recall trick detection
 - active learning for likely missed events
 - fresh-clone release testing on more machines

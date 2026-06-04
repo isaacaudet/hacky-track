@@ -307,8 +307,8 @@ Do not render these as product facts until the gate passes.
 | left/right side | >=20 explicit wearer-limb labels per promoted class, >=3 videos | >=85% clip-disjoint side accuracy | 76 wearer-limb rows, 0.750 accuracy, fail |
 | inner/outer surface | >=20 per promoted class, >=3 videos | >=85% clip-disjoint surface accuracy | 25 rows, 0.760 accuracy, fail |
 | contact type: kick/knee/stall/drop | >=20 per promoted class, >=3 videos | >=85% contact-type accuracy | 82 rows, 0.939 raw accuracy, release-scope fail: stall 7, knee 0, drop_floor 0 |
-| drop/floor reset | enough reviewed positives and negatives across clips | precision >=90%, recall >=90% | not promoted in OWLv2 release path |
-| stall | enough reviewed stall windows and non-stall controls | precision >=85%, recall >=80% | 7 labels, not enough for standalone gate |
+| drop/floor reset | enough reviewed positives and negatives across clips | precision >=90%, recall >=90% | 35 clean reviewed reset rows, 0.609 P / 0.667 R after full OWLv2/L2 coverage, fail |
+| stall | enough reviewed stall windows and non-stall controls | precision >=85%, recall >=80% | 32 clean reviewed stall candidates, but only 3 approved stalls, not-ready |
 | tricks | >=20 examples per promoted trick | >=80% held-out precision | not ready |
 
 ## Next Engineering Work
@@ -321,16 +321,21 @@ The next high-yield work is not more scalar pose tweaks. The frozen embedding br
    - Future side labels should still use `wearer_limb` only when the contacting limb is visually clear; use unknown/ambiguous otherwise.
    - Keep screen-position or pose-anatomical observations as audit metadata, not wearer-side training labels.
    - Build a side-specific foot identity feature only after the semantic target is explicit.
-2. Add dwell/control features for stall:
+2. Rework drop/stall as a sequence problem:
+   - The new stall/drop audit removes the missing-cache confound: all 67 clean rows now have OWLv2/L2 features.
+   - Drop still fails at 0.609 precision / 0.667 recall on 35 clean reset rows, so point-local L2 features are not sufficient.
+   - The visual error sheet shows many reset labels are hidden/gap-style decisions, not obvious single-frame grounded-ball facts.
+   - Next drop attempt should use full rally sequence state: model touch stream on every clip, long no-touch gaps, ball disappearance, and floor/ground context over a window.
+3. Add dwell/control features for stall:
    - Ball speed/stationary duration around candidate.
    - Ball-on-foot proximity persistence across multiple frames.
    - Separate stall window positives from kick impulses.
-3. Improve the label plan:
+4. Improve the label plan:
    - Inner/outer needs at least 20 examples per class, not 7 inner rows.
    - Side needs more balanced left rows and clips where left/right alternates cleanly.
    - Knee/drop/trick labels need their own minimum counts before HUD badges can be promoted.
    - Ambiguous side/surface should stay unknown; noisy labels will hurt more than missing labels.
-4. HUD promotion:
+5. HUD promotion:
    - Keep v0.1 HUD generic for touches.
    - Render side/surface/knee/stall/drop badges only behind gate-passed model outputs or explicit visual overrides.
 
