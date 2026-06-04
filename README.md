@@ -786,7 +786,8 @@ What is still in progress:
   trains, but side and inner/outer surface accuracy are still below gate
 - automatic stall/drop detection; release HUD can render reviewed stall/drop
   labels, and the separate reset/stall audit now has full OWLv2/L2 coverage,
-  but automatic drop still fails gate and stall remains label-limited
+  but automatic drop still fails gate even after score-threshold diagnostics,
+  and stall remains label-limited
 - higher-recall trick detection
 - active learning for likely missed events
 - fresh-clone release testing on more machines

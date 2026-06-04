@@ -200,6 +200,25 @@ class ReleaseStallDropClassifierTests(unittest.TestCase):
             self.assertEqual(streams["video-a_singular_display"], [1.25])
             self.assertEqual(streams["video-a_singular_display.MOV"], [1.25])
 
+    def test_score_threshold_sweep_reports_precision_recall_tradeoff(self) -> None:
+        predictions = [
+            {"label": "approved", "positive_score": 0.9},
+            {"label": "approved", "positive_score": 0.4},
+            {"label": "rejected", "positive_score": 0.8},
+            {"label": "rejected", "positive_score": 0.3},
+        ]
+
+        rows = stall_drop.score_threshold_sweep(predictions, thresholds=(0.35, 0.85))
+        best = stall_drop.best_threshold_row(rows)
+
+        self.assertEqual(rows[0]["true_positive"], 2)
+        self.assertEqual(rows[0]["false_positive"], 1)
+        self.assertAlmostEqual(rows[0]["recall"], 1.0)
+        self.assertEqual(rows[1]["true_positive"], 1)
+        self.assertEqual(rows[1]["false_positive"], 0)
+        self.assertAlmostEqual(rows[1]["precision"], 1.0)
+        self.assertEqual(best["threshold"], 0.35)
+
 
 if __name__ == "__main__":
     unittest.main()

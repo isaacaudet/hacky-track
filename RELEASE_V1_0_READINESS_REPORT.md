@@ -271,7 +271,7 @@ python3 -m unittest discover tests
 Current result:
 
 ```text
-Ran 272 tests in 7.730s
+Ran 273 tests in 7.727s
 OK
 ```
 
@@ -323,6 +323,7 @@ The next high-yield work is not more scalar pose tweaks. The frozen embedding br
 2. Rework drop/stall as a sequence problem:
    - The new stall/drop audit removes the missing-cache confound: all 67 clean rows now have OWLv2/L2 features.
    - Sequence-window/floor-context features improve the prior L2-only drop baseline from 0.609/0.667 to 0.652/0.714 precision/recall; adding available merged-touch gap context improves it again to 0.682/0.714 on 35 clean reset rows, but still fails the 0.90/0.90 gate.
+   - Score-threshold diagnostics do not rescue the drop gate: best F1 is at threshold 0.35 with 0.667 precision / 0.952 recall, still far below the 0.90 precision target.
    - The visual error sheet shows many reset labels are hidden/gap-style decisions, not obvious single-frame grounded-ball facts.
    - Next drop attempt should use full rally sequence state: model touch stream on every clip, long no-touch gaps, ball disappearance, and post-candidate rally-reset state rather than another point-local reset classifier.
 3. Add dwell/control features for stall:

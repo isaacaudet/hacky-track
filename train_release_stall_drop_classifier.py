@@ -705,6 +705,32 @@ def binary_metrics(labels: list[int], predictions: list[int]) -> dict[str, Any]:
     }
 
 
+def score_threshold_sweep(
+    predictions: list[dict[str, Any]],
+    thresholds: tuple[float, ...] = (0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8),
+) -> list[dict[str, Any]]:
+    labels = [1 if row.get("label") == "approved" else 0 for row in predictions]
+    rows: list[dict[str, Any]] = []
+    for threshold in thresholds:
+        threshold_predictions = [1 if float(row.get("positive_score") or 0.0) >= threshold else 0 for row in predictions]
+        metrics = binary_metrics(labels, threshold_predictions)
+        rows.append({"threshold": threshold, **metrics})
+    return rows
+
+
+def best_threshold_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not rows:
+        return None
+    return max(
+        rows,
+        key=lambda row: (
+            float(row.get("f1") or 0.0),
+            float(row.get("recall") or 0.0),
+            float(row.get("precision") or 0.0),
+        ),
+    )
+
+
 def gate_thresholds(kind: str) -> tuple[float, float]:
     if kind == "drop_floor":
         return DROP_GATE_PRECISION, DROP_GATE_RECALL
@@ -838,6 +864,7 @@ def train_target(
     all_labels = [1 if row["label"] == "approved" else 0 for row in predictions]
     all_preds = [1 if row["prediction"] == "approved" else 0 for row in predictions]
     metrics = binary_metrics(all_labels, all_preds)
+    threshold_sweep = score_threshold_sweep(predictions)
     precision_threshold, recall_threshold = gate_thresholds(kind)
     precision = metrics["precision"]
     recall = metrics["recall"]
@@ -862,6 +889,8 @@ def train_target(
             **metrics,
             "folds": folds,
             "skipped_folds": skipped_folds,
+            "score_threshold_sweep": threshold_sweep,
+            "best_score_threshold": best_threshold_row(threshold_sweep),
             "errors": [row for row in predictions if not row["correct"]],
         },
         final_model,
@@ -1161,6 +1190,23 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
                         f"  - `{family}` / `{family_result.get('feature_mode')}`: status `{family_result.get('status')}`, "
                         f"P `{fmt_metric(family_result.get('precision'))}`, R `{fmt_metric(family_result.get('recall'))}`, "
                         f"F1 `{fmt_metric(family_result.get('f1'))}`, gate `{family_result.get('gate')}`"
+                    )
+            if result.get("score_threshold_sweep"):
+                best_threshold = result.get("best_score_threshold") or {}
+                lines.append(
+                    "- Score-threshold diagnostic: "
+                    f"best F1 at threshold `{fmt_metric(best_threshold.get('threshold'))}` "
+                    f"with P `{fmt_metric(best_threshold.get('precision'))}`, "
+                    f"R `{fmt_metric(best_threshold.get('recall'))}`, "
+                    f"F1 `{fmt_metric(best_threshold.get('f1'))}`"
+                )
+                lines.append("- Score-threshold sweep:")
+                for sweep_row in result["score_threshold_sweep"]:
+                    lines.append(
+                        f"  - threshold `{fmt_metric(sweep_row.get('threshold'))}`: "
+                        f"P `{fmt_metric(sweep_row.get('precision'))}`, "
+                        f"R `{fmt_metric(sweep_row.get('recall'))}`, "
+                        f"F1 `{fmt_metric(sweep_row.get('f1'))}`"
                     )
             if result.get("folds"):
                 lines.append("- Leave-one-video-out folds:")

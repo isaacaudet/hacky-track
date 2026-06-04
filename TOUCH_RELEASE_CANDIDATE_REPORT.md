@@ -329,7 +329,7 @@ python3 -m unittest \
   tests.test_release_event_error_audit
 ```
 
-Current result: `272` tests pass.
+Current result: `273` tests pass.
 
 ## Remaining Risks
 
@@ -337,6 +337,7 @@ Current result: `272` tests pass.
 - Long-video `video-68_singular_display` still has 2 visually audited fake touches and no misses at the 0.2s match tolerance.
 - Stall/drop badges are label-backed display events, not automatic release predictions yet.
 - Automatic drop/floor reset has now been evaluated separately with full OWLv2/L2 coverage; sequence-window/floor-context features improve the L2-only baseline from 0.609/0.667 to 0.652/0.714 P/R, and available merged-touch gap context improves it again to 0.682/0.714, but the reset gate still fails.
+- Drop/floor reset score-threshold diagnostics do not rescue the gate: the best F1 threshold is 0.35 with 0.667 precision / 0.952 recall, so the blocker is feature separability, not the default 0.5 threshold.
 - Reviewed contact badges are manual display facts; automatic side/surface badges remain blocked by failed contact gates.
 - Candidate-level CV still fails; the release pass depends on merged event-level output, which is the intended product output.
 - `video-344_singular_display-2` remains the weakest leave-one-video-out clip. Its remaining misses are mostly weak trajectory impulse, touch/stall overlap, or low classifier score.
