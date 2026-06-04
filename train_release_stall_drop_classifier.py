@@ -33,6 +33,7 @@ DEFAULT_VIDEO_SEARCH_DIR = Path.home() / "Downloads"
 DEFAULT_DETECTIONS_JSONL = [
     DEFAULT_CORPUS / "owlv2_touch_detections_v1/detections.jsonl",
     DEFAULT_CORPUS / "owlv2_touch_detections_contact_missing_v1/detections.jsonl",
+    DEFAULT_CORPUS / "owlv2_stall_drop_missing_detections_v1/detections.jsonl",
 ]
 DEFAULT_TOUCH_EVENTS_JSONL = [
     DEFAULT_CORPUS / "touch_classifier_v1/touch_classifier_frozen_events.jsonl",

@@ -224,7 +224,17 @@ Automatic stall/drop audit artifacts:
 runs/release-27-public/touch_corpus_v1/release_stall_drop_classifier_v1/release_stall_drop_classifier_report.md
 runs/release-27-public/touch_corpus_v1/release_stall_drop_classifier_v1/error_audit/stall_drop_error_contact_sheet.jpg
 runs/release-27-public/touch_corpus_v1/owlv2_stall_drop_missing_detections_v1/detections.jsonl
+runs/release-27-public/touch_corpus_v1/touch_classifier_v1/touch_classifier_model_only_events_report.md
+runs/release-27-public/touch_corpus_v1/release_stall_drop_classifier_model_only_fulltrack_v1/release_stall_drop_classifier_report.md
 ```
+
+The model-only touch event stream fills 7 reset/stall clips that lacked
+OOF/frozen release touch streams, producing 44 unreviewed model events. It is
+not release evidence. In the full-track stall/drop ablation it raises touch
+stream coverage from 20 to 27 videos, but automatic drop worsens from
+0.682/0.714 to 0.652/0.714 precision/recall. The release path therefore keeps
+model-only touch streams out of product decisions until a later held-out
+ablation proves lift.
 
 Supplemental detection-cache smoke check:
 
@@ -329,7 +339,7 @@ python3 -m unittest \
   tests.test_release_event_error_audit
 ```
 
-Current result: `273` tests pass.
+Current result: `277` tests pass.
 
 ## Remaining Risks
 
@@ -337,6 +347,7 @@ Current result: `273` tests pass.
 - Long-video `video-68_singular_display` still has 2 visually audited fake touches and no misses at the 0.2s match tolerance.
 - Stall/drop badges are label-backed display events, not automatic release predictions yet.
 - Automatic drop/floor reset has now been evaluated separately with full OWLv2/L2 coverage; sequence-window/floor-context features improve the L2-only baseline from 0.609/0.667 to 0.652/0.714 P/R, and available merged-touch gap context improves it again to 0.682/0.714, but the reset gate still fails.
+- A model-only touch-stream ablation increases reset/stall stream coverage to 27 videos, but worsens drop to 0.652/0.714 P/R, so it remains diagnostic-only.
 - Drop/floor reset score-threshold diagnostics do not rescue the gate: the best F1 threshold is 0.35 with 0.667 precision / 0.952 recall, so the blocker is feature separability, not the default 0.5 threshold.
 - Reviewed contact badges are manual display facts; automatic side/surface badges remain blocked by failed contact gates.
 - Candidate-level CV still fails; the release pass depends on merged event-level output, which is the intended product output.

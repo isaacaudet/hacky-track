@@ -14,6 +14,11 @@ def write_jsonl(path: Path, rows: list[dict]) -> None:
 
 
 class ReleaseStallDropClassifierTests(unittest.TestCase):
+    def test_default_detection_inputs_include_stall_drop_supplemental_cache(self) -> None:
+        names = [path.as_posix() for path in stall_drop.DEFAULT_DETECTIONS_JSONL]
+
+        self.assertTrue(any("owlv2_stall_drop_missing_detections_v1" in name for name in names))
+
     def test_review_rows_drop_conflicts_and_merge_same_status_duplicates(self) -> None:
         rows = [
             {

@@ -158,6 +158,19 @@ Current v1.0 contact-intelligence status is intentionally split:
 | automatic drop/floor reset | evaluated candidate, fails gate at 0.682 precision / 0.714 recall after rally-sequence reset features |
 | automatic stall | not ready; only 3 approved stall examples in the existing reviewed reset/stall corpus |
 
+The separate model-only touch-stream exporter can fill unreviewed touch context
+for reset/stall experiments:
+
+```bash
+python3 export_model_touch_events.py
+```
+
+That artifact is diagnostic-only. It generated 44 model-only events across 7
+reset/stall clips that lacked release touch streams, but the full-track
+stall/drop ablation worsened automatic drop from 0.682/0.714 to 0.652/0.714
+precision/recall. Do not use it as release evidence unless a later held-out
+ablation improves the gate.
+
 The release-candidate report is:
 
 ```text
@@ -787,7 +800,8 @@ What is still in progress:
 - automatic stall/drop detection; release HUD can render reviewed stall/drop
   labels, and the separate reset/stall audit now has full OWLv2/L2 coverage,
   but automatic drop still fails gate even after score-threshold diagnostics,
-  and stall remains label-limited
+  and a model-only touch-stream ablation did not improve it; stall remains
+  label-limited
 - higher-recall trick detection
 - active learning for likely missed events
 - fresh-clone release testing on more machines

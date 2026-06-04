@@ -271,7 +271,7 @@ python3 -m unittest discover tests
 Current result:
 
 ```text
-Ran 273 tests in 7.727s
+Ran 277 tests in 7.844s
 OK
 ```
 
@@ -323,9 +323,10 @@ The next high-yield work is not more scalar pose tweaks. The frozen embedding br
 2. Rework drop/stall as a sequence problem:
    - The new stall/drop audit removes the missing-cache confound: all 67 clean rows now have OWLv2/L2 features.
    - Sequence-window/floor-context features improve the prior L2-only drop baseline from 0.609/0.667 to 0.652/0.714 precision/recall; adding available merged-touch gap context improves it again to 0.682/0.714 on 35 clean reset rows, but still fails the 0.90/0.90 gate.
+   - A separate model-only touch-stream exporter generated 44 unreviewed model events across 7 reset/stall clips without release touch streams, raising stream coverage from 20 to 27 videos, but the full-track ablation worsened drop to 0.652/0.714 precision/recall. Keep that artifact diagnostic-only.
    - Score-threshold diagnostics do not rescue the drop gate: best F1 is at threshold 0.35 with 0.667 precision / 0.952 recall, still far below the 0.90 precision target.
    - The visual error sheet shows many reset labels are hidden/gap-style decisions, not obvious single-frame grounded-ball facts.
-   - Next drop attempt should use full rally sequence state: model touch stream on every clip, long no-touch gaps, ball disappearance, and post-candidate rally-reset state rather than another point-local reset classifier.
+   - Next drop attempt should use reviewed or visually corrected full rally sequence state, long no-touch gaps, ball disappearance, and post-candidate rally-reset state rather than unreviewed model-only touch context or another point-local reset classifier.
 3. Add dwell/control features for stall:
    - Ball speed/stationary duration around candidate.
    - Ball-on-foot proximity persistence across multiple frames.
