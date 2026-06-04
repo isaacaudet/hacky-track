@@ -208,9 +208,9 @@ clip-disjoint contact metrics are:
 
 | target | rows | selected model | raw / balanced accuracy | gate |
 | --- | ---: | --- | ---: | --- |
-| contact type | 82 | ridge classifier, no visual crop and no tracking features | 0.963 / 0.786 | raw pass; release-scope fail until stall/knee/drop labels reach the floor |
+| contact type | 82 | gradient boosting, no vision embedding and no tracking features | 0.951 / 0.844 | raw pass; release-scope fail until stall/knee/drop labels reach the floor |
 | wearer side | 76 | LinearSVC, no visual/tracking features; diagnostic temporal smoothing | 0.776 / 0.752 raw, 0.816 / 0.791 smoothed | fail; smoothing remains diagnostic-only |
-| inner/outer surface | 25 | gradient boosting, pose only | 0.800 / 0.643 | fail |
+| inner/outer surface | 25 | LinearSVC, pose only | 0.760 / 0.702 | fail |
 | drop/floor reset | 35 | ExtraTrees over OWLv2/L2 + floor/context + merged-touch gap features | 0.682 P / 0.714 R | fail |
 | stall | 32 | n/a | n/a | not ready: 3 approved stalls |
 
@@ -277,9 +277,24 @@ CoTracker3 was run on the current contact-labeled corpus with RTMW foot
 landmarks as seeds. It produced 63 usable tracked windows out of 82 processed
 contact-labeled candidates (11/17 train+validation, 52/65 frozen test). The
 feature ablation still selects no-tracking modes for contact type and side;
-side remains `0.776 / 0.752` and surface remains `0.800 / 0.643`. So CoTracker
-is implemented and measured, but not promoted as an automatic side/surface
-badge signal.
+side remains `0.776 / 0.752`, while the selected surface model is still
+pose-only at `0.760 / 0.702`. So CoTracker is implemented and measured, but not
+promoted as an automatic side/surface badge signal.
+
+Local-mask feature artifact:
+
+```text
+runs/release-27-public/touch_corpus_v1/touch_training_dataset_v1/touch_local_mask_feature_report.md
+```
+
+`attach_touch_local_mask_features.py` adds local ball+shoe crop/mask proxy
+features: polar texture/edge sectors around the ball and nearest connected
+component geometry. It attached features to all 82 reviewed contact rows
+(17/17 train+validation, 65/65 frozen test). The ablation did not clear the
+contact gates: the best local-mask side mode reached a small raw bump
+(`0.789`) but worse balanced behavior (`0.731`), and surface local-mask modes
+stayed below the pose-only balanced model. Local masks are therefore diagnostic
+only, not an automatic HUD badge signal.
 
 Supplemental detection-cache smoke check:
 

@@ -152,9 +152,9 @@ Current v1.0 contact-intelligence status is intentionally split:
 | touch timing | release-candidate, merged event-level gates pass with the complete OWLv2 detection cache set |
 | HUD touch sparks | release-candidate, OWLv2/L2 anchors, no HSV fallback |
 | reviewed contact badges | manual/label-backed HUD display only |
-| contact type | candidate, raw kick/stall accuracy reaches 0.963, balanced accuracy 0.786; release-scope fails without enough stall/knee/drop labels |
+| contact type | candidate, raw kick/stall accuracy reaches 0.951, balanced accuracy 0.844; release-scope fails without enough stall/knee/drop labels |
 | left/right side | candidate, below release gate at 0.776 raw / 0.752 balanced accuracy; sequence-smoothed diagnostic reaches 0.816 / 0.791 but remains unpromoted |
-| inner/outer surface | candidate, below release gate at 0.800 raw / 0.643 balanced accuracy |
+| inner/outer surface | candidate, below release gate at 0.760 raw / 0.702 balanced accuracy |
 | automatic drop/floor reset | evaluated candidate, fails gate at 0.682 precision / 0.714 recall after rally-sequence reset features |
 | automatic stall | not ready; only 3 approved stall examples in the existing reviewed reset/stall corpus |
 
@@ -178,6 +178,13 @@ On the current contact-labeled corpus it produced 63 usable tracked windows out
 of 82 processed, but clip-disjoint side/surface metrics still did not improve.
 The selected contact models therefore use `no_tracking_features` modes where
 tracking hurts.
+
+`attach_touch_local_mask_features.py` adds a dependency-light ball+shoe crop
+mask proxy for the same question SAM2 would answer: what local foot/shoe
+structure surrounds the ball? It attached local-mask features to all 82 reviewed
+contact rows. The ablation produced only a tiny raw side bump that worsened
+balanced side behavior, and did not improve surface. Automatic side/surface HUD
+badges therefore remain blocked.
 
 The separate model-only touch-stream exporter can fill unreviewed touch context
 for reset/stall experiments:
@@ -238,7 +245,8 @@ and badge-rendering checks.
 | `train_touch_classifier.py` | Trains/evaluates the fused audio + trajectory touch classifier and writes merged event outputs. |
 | `attach_touch_foot_track_features.py` | Adds RTMW-based temporal foot-continuity features plus label-derived manual foot calibration fields for visual-corrected workflows. |
 | `attach_touch_cotracker_features.py` | Adds optional CoTracker3 foot-continuity features seeded from RTMW foot landmarks on short local windows. |
-| `train_release_contact_classifier.py` | Separate readiness/eval gate for left/right/contact-type labels using pose, visual crop, embedding, and foot-track features when labels/features exist. |
+| `attach_touch_local_mask_features.py` | Adds local ball+shoe crop/mask proxy geometry for contact side/surface ablation. |
+| `train_release_contact_classifier.py` | Separate readiness/eval gate for left/right/contact-type labels using pose, visual crop, local-mask, embedding, and foot-track features when labels/features exist. |
 | `detect_atw_overlay.py` | Experimental footbag/foot heuristic for around-the-world detection. |
 
 ## Quickstart

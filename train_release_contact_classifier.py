@@ -154,6 +154,7 @@ AUTO_FEATURE_PREFIXES = (
     "pose_geometry_",
     "foot_track_",
     "cotracker_",
+    "local_mask_",
     "crop_ball_foot_",
     "visual_",
     "vision_",
@@ -168,17 +169,23 @@ CONTACT_RELEASE_CLASSES = {
 CONTACT_FEATURE_MODES = {
     "all_features": (),
     "no_cotracker": ("cotracker_",),
+    "no_local_mask": ("local_mask_",),
     "no_foot_track": ("foot_track_",),
     "no_tracking_features": ("foot_track_", "cotracker_"),
     "no_visual_crop": ("visual_",),
     "no_visual_crop_no_foot_track": ("visual_", "foot_track_"),
     "no_visual_crop_no_tracking_features": ("visual_", "foot_track_", "cotracker_"),
+    "local_mask_no_visual_crop_no_tracking_features": ("visual_", "foot_track_", "cotracker_"),
     "no_vision_embedding": ("vision_",),
     "no_vision_embedding_no_foot_track": ("vision_", "foot_track_"),
     "no_vision_embedding_no_tracking_features": ("vision_", "foot_track_", "cotracker_"),
-    "no_visual_features": ("visual_", "vision_"),
-    "no_visual_features_no_foot_track": ("visual_", "vision_", "foot_track_"),
-    "no_visual_features_no_tracking_features": ("visual_", "vision_", "foot_track_", "cotracker_"),
+    "local_mask_no_visual_features": ("visual_", "vision_"),
+    "local_mask_no_visual_features_no_foot_track": ("visual_", "vision_", "foot_track_"),
+    "local_mask_no_visual_features_no_tracking_features": ("visual_", "vision_", "foot_track_", "cotracker_"),
+    "no_visual_features": ("visual_", "vision_", "local_mask_"),
+    "no_visual_features_no_foot_track": ("visual_", "vision_", "foot_track_", "local_mask_"),
+    "no_visual_features_no_tracking_features": ("visual_", "vision_", "foot_track_", "cotracker_", "local_mask_"),
+    "no_visual_crop_no_tracking_features_no_local_mask": ("visual_", "foot_track_", "cotracker_", "local_mask_"),
     "pose_only": ("__pose_only__",),
 }
 CONTACT_MODEL_FAMILIES = ("logistic_regression", "ridge_classifier", "linear_svc", "extra_trees", "gradient_boosting")
@@ -186,6 +193,7 @@ LINEAR_SVC_FEATURE_MODES = {
     "no_visual_features",
     "no_visual_features_no_foot_track",
     "no_visual_features_no_tracking_features",
+    "local_mask_no_visual_features_no_tracking_features",
     "pose_only",
 }
 CONTACT_SIDE_SEQUENCE_STATES = ("left", "right")
@@ -340,6 +348,10 @@ def visual_crop_feature_present(row: dict[str, Any]) -> bool:
 
 def vision_embedding_feature_present(row: dict[str, Any]) -> bool:
     return bool(row.get("vision_embedding_present"))
+
+
+def local_mask_feature_present(row: dict[str, Any]) -> bool:
+    return str(row.get("local_mask_feature_status") or "") == "ok"
 
 
 def release_class_coverage(label_counts: Counter[str], label_key: str, *, min_examples_per_class: int = CONTACT_CLASS_MIN_EXAMPLES) -> dict[str, Any] | None:
@@ -619,6 +631,7 @@ def readiness_summary(rows: list[dict[str, Any]], label_examples: list[dict[str,
     pose_rows = sum(1 for row in rows if pose_feature_present(row))
     visual_crop_rows = sum(1 for row in rows if visual_crop_feature_present(row))
     vision_embedding_rows = sum(1 for row in rows if vision_embedding_feature_present(row))
+    local_mask_rows = sum(1 for row in rows if local_mask_feature_present(row))
     labeled_rows = rows_with_contact_labels(rows)
     label_counts = Counter(row.get("contact_type") for row in labeled_rows if row.get("contact_type"))
     side_counts = Counter(row.get("contact_side") for row in labeled_rows if row.get("contact_side"))
@@ -648,6 +661,7 @@ def readiness_summary(rows: list[dict[str, Any]], label_examples: list[dict[str,
         "rows_with_pose_features": pose_rows,
         "rows_with_visual_crop_features": visual_crop_rows,
         "rows_with_vision_embedding_features": vision_embedding_rows,
+        "rows_with_local_mask_features": local_mask_rows,
         "rows_with_contact_labels": len(labeled_rows),
         "videos_with_contact_labels": videos_with_labels,
         "contact_type_counts_in_rows": dict(label_counts),
@@ -1205,23 +1219,29 @@ def train_single_contact_target_best_mode(
         result["model_mode_results"] = combo_results
         return result, None
 
-    def selection_key(item: tuple[str, dict[str, Any]]) -> tuple[float, float, int, int]:
+    def selection_key(item: tuple[str, dict[str, Any]]) -> tuple[int, float, float, int, int]:
         _key, result = item
         feature_mode = str(result.get("feature_mode") or "")
         model_family = str(result.get("model_family") or "")
         feature_preference = {
-            "no_visual_features_no_tracking_features": 5,
-            "no_visual_features_no_foot_track": 4,
-            "no_visual_crop_no_tracking_features": 4,
-            "no_visual_features": 3,
+            "no_visual_features_no_tracking_features": 7,
+            "no_visual_features_no_foot_track": 6,
+            "no_visual_crop_no_tracking_features_no_local_mask": 6,
+            "local_mask_no_visual_features_no_tracking_features": 5,
+            "no_visual_crop_no_tracking_features": 5,
+            "local_mask_no_visual_features_no_foot_track": 4,
+            "no_visual_features": 4,
+            "local_mask_no_visual_crop_no_tracking_features": 4,
             "pose_only": 3,
             "no_visual_crop_no_foot_track": 3,
             "no_vision_embedding_no_tracking_features": 3,
             "no_tracking_features": 3,
             "no_vision_embedding_no_foot_track": 2,
             "no_cotracker": 2,
+            "no_local_mask": 2,
             "no_foot_track": 2,
             "no_visual_crop": 2,
+            "local_mask_no_visual_features": 1,
             "no_vision_embedding": 1,
             "all_features": 0,
         }.get(feature_mode, 0)
@@ -1232,9 +1252,13 @@ def train_single_contact_target_best_mode(
             "extra_trees": 1,
             "gradient_boosting": 0,
         }.get(model_family, 0)
+        accuracy = float(result.get("accuracy") or 0.0)
+        balanced_accuracy = float(result.get("balanced_accuracy") or 0.0)
+        gate_met = 1 if accuracy >= CONTACT_GATE_ACCURACY else 0
         return (
-            float(result.get("accuracy") or 0.0),
-            float(result.get("balanced_accuracy") or 0.0),
+            gate_met,
+            balanced_accuracy,
+            accuracy,
             feature_preference,
             model_preference,
         )
@@ -1349,6 +1373,7 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
         f"- Rows with usable pose distance features: `{summary['rows_with_pose_features']}`",
         f"- Rows with visual crop features: `{summary.get('rows_with_visual_crop_features', 0)}`",
         f"- Rows with vision embedding features: `{summary.get('rows_with_vision_embedding_features', 0)}`",
+        f"- Rows with local mask features: `{summary.get('rows_with_local_mask_features', 0)}`",
         f"- Rows with reviewed contact labels: `{summary['rows_with_contact_labels']}`",
         f"- Event-file contact labels matched to rows: `{summary['event_file_label_match']['matched_examples']}` / `{summary['event_file_label_match']['label_examples']}`",
         "",

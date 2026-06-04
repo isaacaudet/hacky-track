@@ -50,9 +50,9 @@ Clip-disjoint leave-one-video-out results:
 
 | target | accuracy | balanced accuracy | gate | selected feature mode | interpretation |
 | --- | ---: | ---: | --- | --- | --- |
-| contact type | 0.963 | 0.786 | raw pass / release-scope fail | no_visual_crop_no_tracking_features + ridge classifier | Fresh pose-cache completion removes one kick/stall error, but stall recall is still only 0.571 and class coverage blocks full v1.0: stall 7, knee 0, drop_floor 0. |
+| contact type | 0.951 | 0.844 | raw pass / release-scope fail | no_vision_embedding_no_tracking_features + gradient boosting | Balanced model selection improves stall recall to 0.714 while preserving a raw pass, but class coverage blocks full v1.0: stall 7, knee 0, drop_floor 0. |
 | side | 0.776 raw; 0.816 smoothed diagnostic | 0.752 raw; 0.791 smoothed diagnostic | fail | no_visual_features_no_tracking_features + linear SVC; temporal sequence smoothing | Bounded LinearSVC remains best after CoTracker; diagnostic sequence smoothing helps, but still misses the 0.85 side gate and remains unpromoted. |
-| surface | 0.800 | 0.643 | fail | pose_only + gradient boosting | Pose-only surface model improves raw surface accuracy to 0.800, but inner recall remains 0.286 and the target is still label-limited. |
+| surface | 0.760 | 0.702 | fail | pose_only + linear SVC | Balanced model selection raises inner recall to 0.571, but raw accuracy remains below the 0.85 gate and the target is still label-limited. |
 
 Release label gaps from the current reviewed event files:
 
@@ -70,15 +70,15 @@ Feature-mode ablation:
 
 | target | current best | balanced accuracy | prior logistic baseline | result |
 | --- | ---: | ---: | ---: | --- |
-| contact type | 0.963 | 0.786 | 0.902 | Ridge classifier remains strongest on the current kick/stall set, but release-scope coverage is still missing stall/knee/drop labels. |
+| contact type | 0.951 | 0.844 | 0.902 | Gradient boosting with no tracking/embedding features gives the best balanced kick/stall behavior; release-scope coverage is still missing stall/knee/drop labels. |
 | side | 0.776 raw; 0.816 smoothed diagnostic | 0.752 raw; 0.791 smoothed diagnostic | 0.628 | LinearSVC on non-visual scalar features is the best current side model; sequence smoothing is a useful diagnostic lift but still not enough for promotion. |
-| surface | 0.800 | 0.643 | 0.760 | Pose-only gradient boosting is the best current surface model; it fixes one outer error but still cannot learn inner from 7 rows. |
+| surface | 0.760 | 0.702 | 0.760 | Pose-only LinearSVC is the best balanced surface model; it still cannot clear the gate from 7 inner rows. |
 
 Confidence/abstention does not rescue the failing targets:
 
 - Side stays below gate; the selected model reaches 0.776 full coverage / 0.752 balanced accuracy. Diagnostic temporal smoothing improves the same held-out rows to 0.816 / 0.791 by changing 9 rows, but it still misses the 0.85 release gate and is not used for automatic HUD promotion. High-confidence abstention reaches 0.857 only at 27.6% coverage, too sparse for automatic HUD promotion.
 - All current approved/training side labels are now `wearer_limb`, inferred from the side-specific trick labels you already reviewed.
-- Surface stays below gate; selected model is 0.800 raw / 0.643 balanced accuracy and remains label-limited below release scope.
+- Surface stays below gate; selected model is 0.760 raw / 0.702 balanced accuracy and remains label-limited below release scope.
 - Contact type has a raw accuracy pass, but the new release-scope gate correctly keeps it unpromoted until stall/knee/drop_floor class coverage reaches the release floor.
 
 ### Pose / Body Proximity
@@ -201,12 +201,42 @@ Interpretation:
 - The implementation works locally on MPS and produced 63 usable tracked windows
   out of 82 processed contact-labeled candidates.
 - It did not improve the release classifier. Side remains 0.776 raw / 0.752
-  balanced, surface remains 0.800 / 0.643, and the selected models use
-  `no_tracking_features` modes where tracking features hurt.
+  balanced, and the selected side/contact-type models use no-tracking modes
+  where tracking features hurt.
 - This points away from generic foot-point tracking as the immediate blocker.
   The remaining side/surface failures need either stronger local visual
   understanding of the ball+shoe crop, more balanced inner/outer labels, or
   manual/visual-corrected badge workflows.
+
+### Local Ball+Shoe Mask Features
+
+New artifact:
+
+```text
+runs/release-27-public/touch_corpus_v1/touch_training_dataset_v1/touch_local_mask_feature_report.md
+```
+
+Current reviewed-contact coverage:
+
+| split | requested rows | ok rows | component rows |
+| --- | ---: | ---: | ---: |
+| train + validation | 17 | 17 | 15 |
+| frozen test | 65 | 65 | 49 |
+
+Interpretation:
+
+- `attach_touch_local_mask_features.py` implements a dependency-light proxy for
+  SAM2-style local foot/shoe masks: polar sectors around the ball, edge/texture
+  density, and nearest connected component geometry.
+- It was measured on all 82 reviewed contact rows.
+- It does not clear the side or surface gates. The best local-mask side mode
+  reaches 0.789 raw accuracy, but only 0.731 balanced accuracy, so the selected
+  side model remains the older non-visual scalar LinearSVC at 0.776 / 0.752.
+- Surface local-mask modes stay at 0.760 / 0.615; the selected balanced surface
+  model is still pose-only at 0.760 / 0.702.
+- This points away from hand-built local crop masks as the release fix. If we
+  need visual side/surface inference, the next credible route is a learned
+  crop/contact model with more balanced labels, not another heuristic mask.
 
 ### Contact Error Audit
 
@@ -222,10 +252,11 @@ Current error buckets:
 | --- | ---: | --- |
 | pose_missing | 6 | Pose unavailable at contact time. |
 | pose_side_disagreement | 6 | Pose side conflicts with the reviewed side. |
-| side_visual_ambiguity | 5 | Image crop/embedding still cannot infer side reliably. |
-| surface_label_or_geometry_ambiguity | 3 | Inner/outer needs more labels despite embedding gains. |
+| side_visual_ambiguity | 5 | Image crop/embedding/local-mask features still cannot infer side reliably. |
+| surface_label_or_geometry_ambiguity | 4 | Inner/outer needs more labels despite geometry/embedding/mask features. |
 | type_motion_ambiguity | 3 | Mostly stall/kick errors; needs dwell/control features and more stall labels. |
 | pose_surface_disagreement | 2 | Pose foot-edge geometry conflicts with reviewed surface. |
+| stall_window_confusion | 1 | Contact-type model confuses one kick/stall window. |
 
 Representative strips are rendered under:
 
@@ -367,7 +398,7 @@ python3 -m unittest discover tests
 Current result:
 
 ```text
-Ran 284 tests in 10.559s
+Ran 296 tests in 33.153s
 OK
 ```
 
@@ -400,8 +431,8 @@ Do not render these as product facts until the gate passes.
 | signal | minimum labels | release gate | current state |
 | --- | ---: | --- | --- |
 | left/right side | >=20 explicit wearer-limb labels per promoted class, >=3 videos | >=85% clip-disjoint side accuracy | 76 wearer-limb rows, 0.776 raw / 0.752 balanced accuracy; sequence-smoothed diagnostic 0.816 / 0.791, fail |
-| inner/outer surface | >=20 per promoted class, >=3 videos | >=85% clip-disjoint surface accuracy | 25 rows, 0.800 raw / 0.643 balanced accuracy, fail; needs +13 inner and +2 outer labels for release-scope coverage |
-| contact type: kick/knee/stall/drop | >=20 per promoted class, >=3 videos | >=85% contact-type accuracy | 82 rows, 0.963 raw / 0.786 balanced accuracy, release-scope fail: stall 7, knee 0, drop_floor 0 |
+| inner/outer surface | >=20 per promoted class, >=3 videos | >=85% clip-disjoint surface accuracy | 25 rows, 0.760 raw / 0.702 balanced accuracy, fail; needs +13 inner and +2 outer labels for release-scope coverage |
+| contact type: kick/knee/stall/drop | >=20 per promoted class, >=3 videos | >=85% contact-type accuracy | 82 rows, 0.951 raw / 0.844 balanced accuracy, release-scope fail: stall 7, knee 0, drop_floor 0 |
 | drop/floor reset | enough reviewed positives and negatives across clips | precision >=90%, recall >=90% | 35 clean reviewed reset rows, 0.682 P / 0.714 R after rally-sequence reset features, fail |
 | stall | enough reviewed stall windows and non-stall controls | precision >=85%, recall >=80% | 32 clean reviewed stall candidates, but only 3 approved stalls, not-ready |
 | tricks | >=20 examples per promoted trick | >=80% held-out precision | not ready |
@@ -410,16 +441,21 @@ Do not render these as product facts until the gate passes.
 
 The next high-yield work is not more broad scalar model search. LinearSVC and
 pose-only feature selection and side sequence smoothing bought small held-out
-lifts, but both side and surface remain below gate. The remaining work is
-better inner/outer/stall/knee/drop coverage plus a side-specific egocentric
-foot-identity strategy.
+lifts. CoTracker foot tracks and local ball+shoe mask features are now
+implemented and measured, but both side and surface remain below gate. The
+remaining work is better inner/outer/stall/knee/drop coverage plus either a
+learned egocentric ball+foot crop/contact model or a manual/visual-corrected
+badge workflow.
 
 1. Improve side semantics:
    - The audit shows current labels are not explained by a single pose-side or screen-side convention.
    - Do not manually redo existing side-specific trick labels; they now count as `wearer_limb`.
    - Future side labels should still use `wearer_limb` only when the contacting limb is visually clear; use unknown/ambiguous otherwise.
    - Keep screen-position or pose-anatomical observations as audit metadata, not wearer-side training labels.
-   - Build a side-specific foot identity feature only after the semantic target is explicit.
+   - Do not expect a prebuilt foot tracker to solve wearer-side semantics; RTMW,
+     CoTracker, and local-mask features have been measured and remain below gate.
+   - If automatic side remains a product requirement, train a learned crop/contact
+     model from ball+foot image patches after adding more balanced labels.
 2. Rework drop/stall as a sequence problem:
    - The new stall/drop audit removes the missing-cache confound: all 67 clean rows now have OWLv2/L2 features.
    - Sequence-window/floor-context features improve the prior L2-only drop baseline from 0.609/0.667 to 0.652/0.714 precision/recall; adding available merged-touch gap context improves it again to 0.682/0.714 on 35 clean reset rows, but still fails the 0.90/0.90 gate.

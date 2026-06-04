@@ -615,6 +615,33 @@ class ReleaseContactClassifierTests(unittest.TestCase):
         self.assertNotIn("foot_track_nearest_pose_side_confidence", disabled)
         self.assertIn("pose_nearest_foot_dist_px", disabled)
 
+    def test_feature_dict_includes_local_mask_and_can_disable_it(self) -> None:
+        row = {
+            "pose_nearest_foot_dist_px": 12.0,
+            "local_mask_feature_status": "ok",
+            "local_mask_component_angle_cos": -0.4,
+            "visual_ball_x_norm": 0.3,
+            "vision_embedding_000": 0.1,
+            "cotracker_side_confidence": 0.7,
+        }
+
+        features = contact.contact_feature_dict(row)
+        no_local = contact.contact_feature_dict(row, disabled_prefixes=contact.CONTACT_FEATURE_MODES["no_local_mask"])
+        local_only_visual = contact.contact_feature_dict(
+            row,
+            disabled_prefixes=contact.CONTACT_FEATURE_MODES["local_mask_no_visual_features_no_tracking_features"],
+        )
+        no_visual = contact.contact_feature_dict(row, disabled_prefixes=contact.CONTACT_FEATURE_MODES["no_visual_features_no_tracking_features"])
+
+        self.assertEqual(features["local_mask_feature_status"], "ok")
+        self.assertEqual(features["local_mask_component_angle_cos"], -0.4)
+        self.assertNotIn("local_mask_component_angle_cos", no_local)
+        self.assertIn("local_mask_component_angle_cos", local_only_visual)
+        self.assertNotIn("visual_ball_x_norm", local_only_visual)
+        self.assertNotIn("vision_embedding_000", local_only_visual)
+        self.assertNotIn("cotracker_side_confidence", local_only_visual)
+        self.assertNotIn("local_mask_component_angle_cos", no_visual)
+
     def test_ridge_classifier_is_available_as_bounded_contact_model_family(self) -> None:
         model = contact.build_model("ridge_classifier")
 
