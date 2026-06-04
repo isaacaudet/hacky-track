@@ -112,6 +112,53 @@ class ReleaseStallDropClassifierTests(unittest.TestCase):
         self.assertEqual(result["status"], "not_ready")
         self.assertTrue(any("approved" in reason for reason in result["reasons"]))
 
+    def test_sequence_window_features_measure_low_screen_track_context(self) -> None:
+        row = {
+            "kind": "drop_floor",
+            "label": 1,
+            "video_id": "video-a",
+            "video_name": "video-a.MOV",
+            "candidate_time_sec": 1.0,
+        }
+        points = [
+            stall_drop.TrackPoint(time_sec=0.90, x=100, y=910, confidence=0.7, frame_index=27),
+            stall_drop.TrackPoint(time_sec=1.00, x=105, y=920, confidence=0.8, frame_index=30),
+            stall_drop.TrackPoint(time_sec=1.10, x=110, y=930, confidence=0.9, frame_index=33),
+            stall_drop.TrackPoint(time_sec=2.00, x=300, y=200, confidence=0.9, frame_index=60),
+        ]
+
+        out = stall_drop.add_sequence_window_features(
+            row,
+            points,
+            video_path=None,
+            width=1000,
+            height=1000,
+            window_sec=0.5,
+        )
+
+        self.assertAlmostEqual(out["candidate_y_ratio"], 0.92)
+        self.assertEqual(out["sequence_track_count_window"], 3)
+        self.assertEqual(out["sequence_pre_track_count"], 1)
+        self.assertEqual(out["sequence_post_track_count"], 1)
+        self.assertGreater(out["sequence_track_coverage_ratio"], 0.0)
+        self.assertEqual(out["sequence_low_screen_ratio_window"], 1.0)
+        self.assertGreater(out["sequence_mean_speed_px_sec"], 0.0)
+
+    def test_l2_only_feature_mode_excludes_sequence_and_floor_context(self) -> None:
+        row = {
+            "trajectory_impulse_score": 4.0,
+            "sequence_track_count_window": 12,
+            "floor_context_score": 0.5,
+            "candidate_y_ratio": 0.9,
+        }
+
+        features = stall_drop.feature_dict(row, disabled_prefixes=stall_drop.FEATURE_MODES["l2_only"])
+
+        self.assertIn("trajectory_impulse_score", features)
+        self.assertNotIn("sequence_track_count_window", features)
+        self.assertNotIn("floor_context_score", features)
+        self.assertNotIn("candidate_y_ratio", features)
+
 
 if __name__ == "__main__":
     unittest.main()

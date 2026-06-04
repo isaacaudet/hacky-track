@@ -54,7 +54,25 @@ NUMERIC_FEATURES = [
     "candidate_track_confidence",
     "candidate_track_x",
     "candidate_track_y",
+    "candidate_y_ratio",
     "detector_confidence_near_candidate",
+    "floor_context_score",
+    "floor_ground_ratio",
+    "floor_sky_ratio",
+    "sequence_confidence_mean_window",
+    "sequence_gap_after_sec",
+    "sequence_gap_before_sec",
+    "sequence_longest_gap_sec",
+    "sequence_low_screen_ratio_window",
+    "sequence_max_speed_px_sec",
+    "sequence_mean_speed_px_sec",
+    "sequence_post_track_count",
+    "sequence_pre_track_count",
+    "sequence_track_coverage_ratio",
+    "sequence_track_count_window",
+    "sequence_y_ratio_max_window",
+    "sequence_y_ratio_mean_window",
+    "sequence_y_ratio_min_window",
     "trajectory_ax_window",
     "trajectory_ay_window",
     "trajectory_break_support",
@@ -86,6 +104,10 @@ NUMERIC_FEATURES = [
 BOOLEAN_FEATURES = ["height_reversal"]
 CATEGORICAL_FEATURES = ["trajectory_feature_status"]
 MODEL_FAMILIES = ("logistic_regression", "extra_trees", "gradient_boosting")
+FEATURE_MODES = {
+    "l2_only": ("sequence_", "floor_", "candidate_y_ratio"),
+    "sequence_window": (),
+}
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -346,15 +368,135 @@ def add_nearest_track_features(row: dict[str, Any], points: list[TrackPoint]) ->
     return out
 
 
+def frame_interval(points: list[TrackPoint]) -> float:
+    deltas = [b.time_sec - a.time_sec for a, b in zip(points, points[1:]) if b.time_sec > a.time_sec]
+    if not deltas:
+        return 1.0 / 30.0
+    return float(np.median(np.asarray(deltas, dtype=float)))
+
+
+def longest_track_gap(points: list[TrackPoint], *, start: float, end: float) -> float | None:
+    if not points:
+        return None
+    times = [start, *[point.time_sec for point in points], end]
+    return max(b - a for a, b in zip(times, times[1:]))
+
+
+def local_floor_context_scores(frame: np.ndarray, x: float, y: float, radius: int = 76) -> tuple[float, float]:
+    h, w = frame.shape[:2]
+    left = max(0, int(round(x - radius)))
+    right = min(w, int(round(x + radius)))
+    top = max(0, int(round(y - radius)))
+    bottom = min(h, int(round(y + radius)))
+    if right <= left or bottom <= top:
+        return 0.0, 0.0
+    patch = frame[top:bottom, left:right]
+    hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+    hue = hsv[:, :, 0]
+    sat = hsv[:, :, 1]
+    val = hsv[:, :, 2]
+    green = (hue >= 28) & (hue <= 92) & (sat >= 22) & (val >= 35)
+    tan = (hue >= 8) & (hue <= 34) & (sat >= 18) & (val >= 45)
+    dark_ground = (hue >= 18) & (hue <= 105) & (sat >= 12) & (val >= 18) & (val <= 135)
+    sky = ((hue >= 88) & (hue <= 128) & (sat >= 25) & (val >= 75)) | ((sat <= 28) & (val >= 170))
+    total = max(1, patch.shape[0] * patch.shape[1])
+    return float(np.count_nonzero(green | tan | dark_ground) / total), float(np.count_nonzero(sky) / total)
+
+
+def video_paths_with_download_fallback(review_manifest: Path) -> dict[str, str]:
+    video_paths = load_video_paths(review_manifest)
+    for video_path in sorted(DEFAULT_VIDEO_SEARCH_DIR.glob("video-*singular_display*.MOV")):
+        video_paths.setdefault(normalize_video_id(video_path.name), str(video_path))
+    return video_paths
+
+
+def video_dimensions(video_path: str | None) -> tuple[int | None, int | None]:
+    if not video_path:
+        return None, None
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        return None, None
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0) or None
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0) or None
+    cap.release()
+    return width, height
+
+
+def add_sequence_window_features(
+    row: dict[str, Any],
+    points: list[TrackPoint],
+    *,
+    video_path: str | None,
+    width: int | None,
+    height: int | None,
+    window_sec: float = 1.0,
+) -> dict[str, Any]:
+    out = dict(row)
+    time_sec = float(row["candidate_time_sec"])
+    start = time_sec - window_sec
+    end = time_sec + window_sec
+    window_points = [point for point in points if start <= point.time_sec <= end]
+    pre_points = [point for point in window_points if point.time_sec < time_sec]
+    post_points = [point for point in window_points if point.time_sec > time_sec]
+    interval = frame_interval(window_points)
+    expected_points = max(1.0, (2.0 * window_sec) / max(interval, 1e-6))
+    y_ratios = [point.y / height for point in window_points if height]
+    speeds: list[float] = []
+    for a, b in zip(window_points, window_points[1:]):
+        dt = b.time_sec - a.time_sec
+        if dt <= 0:
+            continue
+        speeds.append(float(math.hypot(b.x - a.x, b.y - a.y) / dt))
+    nearest = nearest_track_point(points, time_sec)
+    candidate_y_ratio = None
+    floor_ground_ratio = None
+    floor_sky_ratio = None
+    floor_context_score = None
+    if nearest is not None and height:
+        candidate_y_ratio = float(nearest.y / height)
+    if nearest is not None and video_path:
+        frame = read_frame(video_path, time_sec)
+        if frame is not None:
+            floor_ground_ratio, floor_sky_ratio = local_floor_context_scores(frame, nearest.x, nearest.y)
+            floor_context_score = float(floor_ground_ratio - floor_sky_ratio)
+    before_times = [point.time_sec for point in points if point.time_sec < time_sec]
+    after_times = [point.time_sec for point in points if point.time_sec > time_sec]
+    out.update(
+        {
+            "candidate_y_ratio": None if candidate_y_ratio is None else round(candidate_y_ratio, 6),
+            "floor_ground_ratio": None if floor_ground_ratio is None else round(floor_ground_ratio, 6),
+            "floor_sky_ratio": None if floor_sky_ratio is None else round(floor_sky_ratio, 6),
+            "floor_context_score": None if floor_context_score is None else round(floor_context_score, 6),
+            "sequence_track_count_window": len(window_points),
+            "sequence_pre_track_count": len(pre_points),
+            "sequence_post_track_count": len(post_points),
+            "sequence_track_coverage_ratio": round(min(1.0, len(window_points) / expected_points), 6),
+            "sequence_longest_gap_sec": None if not window_points else round(float(longest_track_gap(window_points, start=start, end=end) or 0.0), 6),
+            "sequence_gap_before_sec": None if not before_times else round(float(time_sec - max(before_times)), 6),
+            "sequence_gap_after_sec": None if not after_times else round(float(min(after_times) - time_sec), 6),
+            "sequence_y_ratio_min_window": None if not y_ratios else round(float(min(y_ratios)), 6),
+            "sequence_y_ratio_max_window": None if not y_ratios else round(float(max(y_ratios)), 6),
+            "sequence_y_ratio_mean_window": None if not y_ratios else round(float(np.mean(y_ratios)), 6),
+            "sequence_low_screen_ratio_window": None if not y_ratios else round(float(sum(1 for value in y_ratios if value >= 0.88) / len(y_ratios)), 6),
+            "sequence_mean_speed_px_sec": None if not speeds else round(float(np.mean(speeds)), 6),
+            "sequence_max_speed_px_sec": None if not speeds else round(float(max(speeds)), 6),
+            "sequence_confidence_mean_window": None if not window_points else round(float(np.mean([point.confidence for point in window_points])), 6),
+        }
+    )
+    return out
+
+
 def attach_release_track_features(
     rows: list[dict[str, Any]],
     tracks: dict[str, list[TrackPoint]],
     *,
+    video_paths: dict[str, str] | None = None,
     min_points: int = 12,
     max_track_gap_sec: float = DEFAULT_MAX_TRACK_GAP_SEC,
     break_tolerance_sec: float = DEFAULT_BREAK_TOLERANCE_SEC,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     track_cache: dict[str, TrackFeatures] = {}
+    video_dimension_cache: dict[str, tuple[int | None, int | None]] = {}
     out_rows: list[dict[str, Any]] = []
     per_video: dict[str, dict[str, Any]] = {}
     for row in rows:
@@ -367,6 +509,11 @@ def attach_release_track_features(
                 track_cache[video_name] = TrackFeatures("missing_detection_track", [], np.asarray([]), np.asarray([]), np.asarray([]), np.asarray([]), 0)
         updated = attach_row_features(row, track_cache[video_name], break_tolerance_sec=break_tolerance_sec)
         updated = add_nearest_track_features(updated, points)
+        video_path = None if video_paths is None else video_paths.get(str(row.get("video_id"))) or video_paths.get(normalize_video_id(video_name))
+        if video_name not in video_dimension_cache:
+            video_dimension_cache[video_name] = video_dimensions(video_path)
+        width, height = video_dimension_cache[video_name]
+        updated = add_sequence_window_features(updated, points, video_path=video_path, width=width, height=height)
         out_rows.append(updated)
         stats = per_video.setdefault(
             video_name,
@@ -379,6 +526,8 @@ def attach_release_track_features(
                 "track_points": len(points),
                 "track_status": track_cache[video_name].status,
                 "track_segments": track_cache[video_name].segments,
+                "video_width": width,
+                "video_height": height,
             },
         )
         stats["rows"] += 1
@@ -408,13 +557,23 @@ def feature_value(row: dict[str, Any], key: str) -> float:
     return out if math.isfinite(out) else 0.0
 
 
-def feature_dict(row: dict[str, Any]) -> dict[str, Any]:
+def disabled_feature(key: str, disabled_prefixes: Iterable[str]) -> bool:
+    return any(key == prefix or key.startswith(prefix) for prefix in disabled_prefixes)
+
+
+def feature_dict(row: dict[str, Any], *, disabled_prefixes: Iterable[str] = ()) -> dict[str, Any]:
     features: dict[str, Any] = {}
     for key in NUMERIC_FEATURES:
+        if disabled_feature(key, disabled_prefixes):
+            continue
         features[key] = feature_value(row, key)
     for key in BOOLEAN_FEATURES:
+        if disabled_feature(key, disabled_prefixes):
+            continue
         features[key] = 1.0 if bool(row.get(key)) else 0.0
     for key in CATEGORICAL_FEATURES:
+        if disabled_feature(key, disabled_prefixes):
+            continue
         features[key] = str(row.get(key) or "missing")
     return features
 
@@ -481,6 +640,8 @@ def train_target(
     min_positive_examples: int = DEFAULT_MIN_POSITIVE_EXAMPLES,
     min_negative_examples: int = DEFAULT_MIN_NEGATIVE_EXAMPLES,
     model_family: str = "logistic_regression",
+    feature_mode: str = "sequence_window",
+    disabled_prefixes: Iterable[str] = (),
 ) -> tuple[dict[str, Any], Any | None]:
     target_rows = [row for row in rows if row.get("kind") == kind]
     labels = [int(row["label"]) for row in target_rows]
@@ -503,6 +664,8 @@ def train_target(
                 "status": "not_ready",
                 "kind": kind,
                 "model_family": model_family,
+                "feature_mode": feature_mode,
+                "disabled_prefixes": list(disabled_prefixes),
                 "reasons": reasons,
                 "rows": len(target_rows),
                 "videos": videos,
@@ -522,11 +685,12 @@ def train_target(
             skipped_folds.append({"video_id": video_id, "rows": len(test_rows), "reason": "training fold has one class"})
             continue
         model = build_model(model_family)
-        model.fit([feature_dict(row) for row in train_rows], train_labels)
+        model.fit([feature_dict(row, disabled_prefixes=disabled_prefixes) for row in train_rows], train_labels)
         test_labels = [int(row["label"]) for row in test_rows]
-        fold_preds = [int(value) for value in model.predict([feature_dict(row) for row in test_rows])]
+        test_feature_rows = [feature_dict(row, disabled_prefixes=disabled_prefixes) for row in test_rows]
+        fold_preds = [int(value) for value in model.predict(test_feature_rows)]
         if hasattr(model, "predict_proba"):
-            proba = model.predict_proba([feature_dict(row) for row in test_rows])
+            proba = model.predict_proba(test_feature_rows)
             classes = [int(item) for item in model.classes_]
             positive_index = classes.index(1) if 1 in classes else 0
             positive_scores = [float(row[positive_index]) for row in proba]
@@ -546,6 +710,8 @@ def train_target(
             predictions.append(
                 {
                     "kind": kind,
+                    "feature_mode": feature_mode,
+                    "model_family": model_family,
                     "video_id": row.get("video_id"),
                     "video_name": row.get("video_name"),
                     "candidate_time_sec": row.get("candidate_time_sec"),
@@ -557,6 +723,14 @@ def train_target(
                     "trajectory_impulse_score": row.get("trajectory_impulse_score"),
                     "trajectory_y_range_window_px": row.get("trajectory_y_range_window_px"),
                     "candidate_track_confidence": row.get("candidate_track_confidence"),
+                    "candidate_y_ratio": row.get("candidate_y_ratio"),
+                    "floor_context_score": row.get("floor_context_score"),
+                    "floor_ground_ratio": row.get("floor_ground_ratio"),
+                    "floor_sky_ratio": row.get("floor_sky_ratio"),
+                    "sequence_track_coverage_ratio": row.get("sequence_track_coverage_ratio"),
+                    "sequence_low_screen_ratio_window": row.get("sequence_low_screen_ratio_window"),
+                    "sequence_longest_gap_sec": row.get("sequence_longest_gap_sec"),
+                    "sequence_mean_speed_px_sec": row.get("sequence_mean_speed_px_sec"),
                 }
             )
     if not predictions:
@@ -565,6 +739,8 @@ def train_target(
                 "status": "not_ready",
                 "kind": kind,
                 "model_family": model_family,
+                "feature_mode": feature_mode,
+                "disabled_prefixes": list(disabled_prefixes),
                 "reasons": ["all leave-one-video-out folds were skipped"],
                 "rows": len(target_rows),
                 "videos": videos,
@@ -582,12 +758,14 @@ def train_target(
     recall = metrics["recall"]
     gate_pass = precision is not None and recall is not None and precision >= precision_threshold and recall >= recall_threshold
     final_model = build_model(model_family)
-    final_model.fit([feature_dict(row) for row in target_rows], labels)
+    final_model.fit([feature_dict(row, disabled_prefixes=disabled_prefixes) for row in target_rows], labels)
     return (
         {
             "status": "trained",
             "kind": kind,
             "model_family": model_family,
+            "feature_mode": feature_mode,
+            "disabled_prefixes": list(disabled_prefixes),
             "rows": len(target_rows),
             "evaluated_rows": len(predictions),
             "videos": videos,
@@ -608,30 +786,67 @@ def train_target(
 def train_best_target(rows: list[dict[str, Any]], kind: str) -> tuple[dict[str, Any], Any | None]:
     results: dict[str, dict[str, Any]] = {}
     models: dict[str, Any] = {}
+    for mode_name, disabled_prefixes in FEATURE_MODES.items():
+        for family in MODEL_FAMILIES:
+            result, model = train_target(
+                rows,
+                kind,
+                model_family=family,
+                feature_mode=mode_name,
+                disabled_prefixes=disabled_prefixes,
+            )
+            model_key = f"{mode_name}/{family}"
+            results[model_key] = result
+            if model is not None:
+                models[model_key] = model
+    trained = [(model_key, result) for model_key, result in results.items() if result.get("status") == "trained"]
+    mode_best: dict[str, dict[str, Any]] = {}
+    family_best: dict[str, dict[str, Any]] = {}
+    for mode_name in FEATURE_MODES:
+        candidates = [(key, result) for key, result in trained if str(result.get("feature_mode")) == mode_name]
+        if candidates:
+            mode_best[mode_name] = max(candidates, key=lambda item: (float(item[1].get("f1") or 0.0), float(item[1].get("precision") or 0.0)))[1]
+        else:
+            first_key = f"{mode_name}/{MODEL_FAMILIES[0]}"
+            if first_key in results:
+                mode_best[mode_name] = results[first_key]
     for family in MODEL_FAMILIES:
-        result, model = train_target(rows, kind, model_family=family)
-        results[family] = result
-        if model is not None:
-            models[family] = model
-    trained = [(family, result) for family, result in results.items() if result.get("status") == "trained"]
+        candidates = [(key, result) for key, result in trained if str(result.get("model_family")) == family]
+        if candidates:
+            family_best[family] = max(candidates, key=lambda item: (float(item[1].get("f1") or 0.0), float(item[1].get("precision") or 0.0)))[1]
+        else:
+            first_key = f"{next(iter(FEATURE_MODES))}/{family}"
+            if first_key in results:
+                family_best[family] = results[first_key]
     if not trained:
-        first = results[MODEL_FAMILIES[0]]
+        first = results[f"{next(iter(FEATURE_MODES))}/{MODEL_FAMILIES[0]}"]
         first = dict(first)
-        first["model_family_results"] = results
+        first["selected_feature_mode"] = first.get("feature_mode")
+        first["selected_model_family"] = first.get("model_family")
+        first["model_mode_results"] = results
+        first["feature_mode_results"] = mode_best
+        first["model_family_results"] = family_best
         return first, None
 
-    def key(item: tuple[str, dict[str, Any]]) -> tuple[float, float, int]:
-        family, result = item
+    def key(item: tuple[str, dict[str, Any]]) -> tuple[float, float, int, int]:
+        model_key, result = item
         f1 = result.get("f1")
         precision = result.get("precision")
+        mode = str(result.get("feature_mode"))
+        family = str(result.get("model_family"))
+        mode_preference = {"l2_only": 1, "sequence_window": 0}.get(mode, 0)
         preference = {"logistic_regression": 2, "extra_trees": 1, "gradient_boosting": 0}.get(family, 0)
-        return (float(f1 or 0.0), float(precision or 0.0), preference)
+        return (float(f1 or 0.0), float(precision or 0.0), mode_preference, preference)
 
-    family, best = max(trained, key=key)
+    model_key, best = max(trained, key=key)
     out = dict(best)
-    out["selected_model_family"] = family
-    out["model_family_results"] = results
-    return out, models.get(family)
+    out["selected_feature_mode"] = best.get("feature_mode")
+    out["selected_model_family"] = best.get("model_family")
+    out["selected_model_key"] = model_key
+    out["model_mode_results"] = results
+    out["feature_mode_results"] = mode_best
+    out["model_family_results"] = family_best
+    return out, models.get(model_key)
 
 
 def write_training_artifacts(out_dir: Path, models: dict[str, Any], results: dict[str, Any]) -> str | None:
@@ -644,6 +859,7 @@ def write_training_artifacts(out_dir: Path, models: dict[str, Any], results: dic
             "models": models,
             "targets": sorted(models),
             "model_results": results,
+            "feature_modes": FEATURE_MODES,
             "numeric_features": NUMERIC_FEATURES,
             "boolean_features": BOOLEAN_FEATURES,
             "categorical_features": CATEGORICAL_FEATURES,
@@ -685,6 +901,16 @@ def render_error_strip(
         (12, 62),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.48,
+        (55, 55, 55),
+        1,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        canvas,
+        f"y_ratio={fmt_metric(row.get('candidate_y_ratio'))} floor={fmt_metric(row.get('floor_context_score'))} low_screen={fmt_metric(row.get('sequence_low_screen_ratio_window'))} gap={fmt_metric(row.get('sequence_longest_gap_sec'))}",
+        (12, 84),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.42,
         (55, 55, 55),
         1,
         cv2.LINE_AA,
@@ -807,15 +1033,16 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
         "",
         "## Gates",
         "",
-        "| target | rows | approved/rejected | model | precision | recall | f1 | gate |",
+        "| target | rows | approved/rejected | feature/model | precision | recall | f1 | gate |",
         "| --- | ---: | --- | --- | ---: | ---: | ---: | --- |",
         ]
     )
     for target, result in summary["targets"].items():
         counts = result.get("label_counts") or {}
+        feature_model = f"{result.get('selected_feature_mode') or result.get('feature_mode')}/{result.get('selected_model_family') or result.get('model_family')}"
         lines.append(
             f"| `{target}` | {result.get('rows')} | {counts.get('approved', 0)}/{counts.get('rejected', 0)} | "
-            f"`{result.get('selected_model_family') or result.get('model_family')}` | {fmt_metric(result.get('precision'))} | "
+            f"`{feature_model}` | {fmt_metric(result.get('precision'))} | "
             f"{fmt_metric(result.get('recall'))} | {fmt_metric(result.get('f1'))} | `{result.get('gate', result.get('status'))}` |"
         )
     lines.extend(["", "## Target Details", ""])
@@ -826,14 +1053,23 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
             for reason in result["reasons"]:
                 lines.append(f"- Blocker: {reason}")
         if result.get("status") == "trained":
+            lines.append(f"- Selected feature mode: `{result.get('selected_feature_mode') or result.get('feature_mode')}`")
             lines.append(f"- Selected model family: `{result.get('selected_model_family')}`")
             lines.append(f"- Gate thresholds: precision >= `{result.get('precision_threshold')}`, recall >= `{result.get('recall_threshold')}`")
             lines.append(f"- Confusion: TP `{result.get('true_positive')}`, FP `{result.get('false_positive')}`, FN `{result.get('false_negative')}`, TN `{result.get('true_negative')}`")
+            if result.get("feature_mode_results"):
+                lines.append("- Feature-mode ablation:")
+                for mode_name, mode_result in result["feature_mode_results"].items():
+                    lines.append(
+                        f"  - `{mode_name}` / `{mode_result.get('model_family')}`: status `{mode_result.get('status')}`, "
+                        f"P `{fmt_metric(mode_result.get('precision'))}`, R `{fmt_metric(mode_result.get('recall'))}`, "
+                        f"F1 `{fmt_metric(mode_result.get('f1'))}`, gate `{mode_result.get('gate')}`"
+                    )
             if result.get("model_family_results"):
-                lines.append("- Model-family ablation:")
+                lines.append("- Best-per-family ablation:")
                 for family, family_result in result["model_family_results"].items():
                     lines.append(
-                        f"  - `{family}`: status `{family_result.get('status')}`, "
+                        f"  - `{family}` / `{family_result.get('feature_mode')}`: status `{family_result.get('status')}`, "
                         f"P `{fmt_metric(family_result.get('precision'))}`, R `{fmt_metric(family_result.get('recall'))}`, "
                         f"F1 `{fmt_metric(family_result.get('f1'))}`, gate `{family_result.get('gate')}`"
                     )
@@ -863,7 +1099,9 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
             "## Release Interpretation",
             "",
             "- This uses existing reviewed reset/stall decisions; it does not ask for duplicate labels.",
-            "- The supplemental stall/drop OWLv2 cache removes missing-track confounds; failure after full coverage means the current scalar L2 features are not enough for automatic drop promotion.",
+            "- The supplemental stall/drop OWLv2 cache removes missing-track confounds.",
+            "- The sequence-window/floor-context ablation is compared against the prior L2-only baseline; it is selected only when leave-one-video-out metrics improve.",
+            "- Failure after full coverage and sequence-window context means the remaining automatic drop/reset problem is not a simple detector-coverage or single-frame floor-context issue.",
             "- Drop/stall badges should remain unpromoted unless the target gate passes and downstream HUD integration is explicitly wired.",
             "- Stall is expected to remain label-limited when approved examples are scarce.",
         ]
@@ -884,9 +1122,11 @@ def run_stall_drop_classifier(args: argparse.Namespace) -> dict[str, Any]:
         manifest_path = compact_cache.with_suffix(".manifest.json")
         compact_manifest = read_json(manifest_path) if manifest_path.exists() else {"cache_path": str(compact_cache), "kept_points": len(read_jsonl(compact_cache))}
     tracks = load_compact_tracks(compact_cache)
+    video_paths = video_paths_with_download_fallback(args.review_manifest)
     feature_rows, feature_summary = attach_release_track_features(
         review_rows,
         tracks,
+        video_paths=video_paths,
         min_points=args.min_points,
         max_track_gap_sec=args.max_track_gap_sec,
         break_tolerance_sec=args.break_tolerance_sec,

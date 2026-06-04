@@ -307,7 +307,7 @@ Do not render these as product facts until the gate passes.
 | left/right side | >=20 explicit wearer-limb labels per promoted class, >=3 videos | >=85% clip-disjoint side accuracy | 76 wearer-limb rows, 0.750 accuracy, fail |
 | inner/outer surface | >=20 per promoted class, >=3 videos | >=85% clip-disjoint surface accuracy | 25 rows, 0.760 accuracy, fail |
 | contact type: kick/knee/stall/drop | >=20 per promoted class, >=3 videos | >=85% contact-type accuracy | 82 rows, 0.939 raw accuracy, release-scope fail: stall 7, knee 0, drop_floor 0 |
-| drop/floor reset | enough reviewed positives and negatives across clips | precision >=90%, recall >=90% | 35 clean reviewed reset rows, 0.609 P / 0.667 R after full OWLv2/L2 coverage, fail |
+| drop/floor reset | enough reviewed positives and negatives across clips | precision >=90%, recall >=90% | 35 clean reviewed reset rows, 0.652 P / 0.714 R after sequence-window/floor-context features, fail |
 | stall | enough reviewed stall windows and non-stall controls | precision >=85%, recall >=80% | 32 clean reviewed stall candidates, but only 3 approved stalls, not-ready |
 | tricks | >=20 examples per promoted trick | >=80% held-out precision | not ready |
 
@@ -323,9 +323,9 @@ The next high-yield work is not more scalar pose tweaks. The frozen embedding br
    - Build a side-specific foot identity feature only after the semantic target is explicit.
 2. Rework drop/stall as a sequence problem:
    - The new stall/drop audit removes the missing-cache confound: all 67 clean rows now have OWLv2/L2 features.
-   - Drop still fails at 0.609 precision / 0.667 recall on 35 clean reset rows, so point-local L2 features are not sufficient.
+   - Sequence-window/floor-context features improve the prior L2-only drop baseline from 0.609/0.667 to 0.652/0.714 precision/recall on 35 clean reset rows, but still fail the 0.90/0.90 gate.
    - The visual error sheet shows many reset labels are hidden/gap-style decisions, not obvious single-frame grounded-ball facts.
-   - Next drop attempt should use full rally sequence state: model touch stream on every clip, long no-touch gaps, ball disappearance, and floor/ground context over a window.
+   - Next drop attempt should use full rally sequence state: model touch stream on every clip, long no-touch gaps, ball disappearance, and post-candidate rally-reset state rather than another point-local reset classifier.
 3. Add dwell/control features for stall:
    - Ball speed/stationary duration around candidate.
    - Ball-on-foot proximity persistence across multiple frames.

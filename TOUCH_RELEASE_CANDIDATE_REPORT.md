@@ -211,7 +211,7 @@ clip-disjoint contact metrics are:
 | contact type | 82 | gradient boosting, no visual crop | 0.939 | raw pass; release-scope fail until stall/knee/drop labels reach the floor |
 | wearer side | 76 | ExtraTrees, no ball-centered visual crop | 0.750 | fail |
 | inner/outer surface | 25 | ExtraTrees, no ball-centered visual crop | 0.760 | fail |
-| drop/floor reset | 35 | ExtraTrees over OWLv2/L2 reset features | 0.609 P / 0.667 R | fail |
+| drop/floor reset | 35 | ExtraTrees over OWLv2/L2 + sequence-window/floor-context reset features | 0.652 P / 0.714 R | fail |
 | stall | 32 | n/a | n/a | not ready: 3 approved stalls |
 
 The HUD now shows reviewed contact labels as manual badges when a merged touch
@@ -336,7 +336,7 @@ Current result: `260` tests pass.
 - This is a touch-detection release candidate, not a full automatic trick/side/contact-type release.
 - Long-video `video-68_singular_display` still has 2 visually audited fake touches and no misses at the 0.2s match tolerance.
 - Stall/drop badges are label-backed display events, not automatic release predictions yet.
-- Automatic drop/floor reset has now been evaluated separately with full OWLv2/L2 coverage and still fails gate; next work needs rally-sequence state rather than another point-local drop classifier.
+- Automatic drop/floor reset has now been evaluated separately with full OWLv2/L2 coverage; sequence-window/floor-context features improve the L2-only baseline from 0.609/0.667 to 0.652/0.714 P/R, but still fail gate.
 - Reviewed contact badges are manual display facts; automatic side/surface badges remain blocked by failed contact gates.
 - Candidate-level CV still fails; the release pass depends on merged event-level output, which is the intended product output.
 - `video-344_singular_display-2` remains the weakest leave-one-video-out clip. Its remaining misses are mostly weak trajectory impulse, touch/stall overlap, or low classifier score.
