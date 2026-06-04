@@ -8,6 +8,7 @@ from pathlib import Path
 from render_touch_release_hud import (
     TrackPoint,
     apply_touch_overrides,
+    apply_reviewed_touch_contact_labels,
     build_hud_doc_and_anchors,
     labeled_release_events,
     load_touch_overrides,
@@ -102,6 +103,116 @@ class RenderTouchReleaseHudTests(unittest.TestCase):
             overrides = load_touch_overrides(path)
 
             self.assertEqual(overrides["video-test"]["remove_touch_times_sec"], [1.0])
+
+    def test_reviewed_contact_labels_are_attached_to_matching_touch_events(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            video = self.video()
+            label_doc = {
+                "source_video": "video-test.MOV",
+                "rallies": [
+                    {
+                        "id": 1,
+                        "events": [
+                            {
+                                "type": "touch",
+                                "time_sec": 1.02,
+                                "review_status": "approved",
+                                "trick_label": "left_inner_kick",
+                                "contact_type": "kick",
+                                "contact_side": "left",
+                                "contact_side_basis": "wearer_limb",
+                                "contact_surface": "inner",
+                            }
+                        ],
+                    }
+                ],
+            }
+            write_json(root / "labels" / "video-test.events.json", label_doc)
+            touches = [{"event_type": "touch", "time_sec": 1.0, "confidence": 0.9}]
+
+            enriched, summary = apply_reviewed_touch_contact_labels(
+                touches,
+                video,
+                root / "labels",
+                root / "legacy",
+                tolerance_sec=0.2,
+            )
+
+            self.assertEqual(summary["reviewed_touch_labels_applied"], 1)
+            self.assertEqual(summary["reviewed_contact_side_labels"], 1)
+            self.assertEqual(summary["reviewed_contact_surface_labels"], 1)
+            self.assertEqual(enriched[0]["contact_label"], "left_inner_kick")
+            self.assertEqual(enriched[0]["contact_side"], "left")
+            self.assertEqual(enriched[0]["contact_side_basis"], "wearer_limb")
+            self.assertTrue(enriched[0]["manual_contact_label"])
+
+    def test_reviewed_touch_without_contact_detail_does_not_create_badge(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            video = self.video()
+            label_doc = {
+                "source_video": "video-test.MOV",
+                "rallies": [
+                    {
+                        "id": 1,
+                        "events": [{"type": "touch", "time_sec": 1.02, "review_status": "approved"}],
+                    }
+                ],
+            }
+            write_json(root / "labels" / "video-test.events.json", label_doc)
+            touches = [{"event_type": "touch", "time_sec": 1.0, "confidence": 0.9}]
+
+            enriched, summary = apply_reviewed_touch_contact_labels(
+                touches,
+                video,
+                root / "labels",
+                root / "legacy",
+                tolerance_sec=0.2,
+            )
+
+            self.assertEqual(summary["reviewed_touch_labels_available"], 0)
+            self.assertNotIn("manual_contact_label", enriched[0])
+
+    def test_hud_doc_marks_reviewed_contact_badges_as_manual(self) -> None:
+        points = [
+            TrackPoint(time_sec=t, x=100.0 + t * 10.0, y=200.0, confidence=0.9)
+            for t in [0.8, 1.0, 1.2]
+        ]
+        events = [
+            {
+                "event_type": "touch",
+                "time_sec": 1.0,
+                "confidence": 0.8,
+                "contact_label": "right_outer_kick",
+                "contact_label_source": "reviewed_visual_label",
+                "contact_label_delta_sec": 0.02,
+                "contact_type": "kick",
+                "contact_side": "right",
+                "contact_side_basis": "wearer_limb",
+                "contact_surface": "outer",
+                "manual_contact_label": True,
+            }
+        ]
+
+        doc, _anchors, summary = build_hud_doc_and_anchors(
+            self.video(),
+            events,
+            points,
+            points,
+            rally_gap_sec=2.2,
+            max_track_gap_sec=0.4,
+        )
+
+        event = doc["events"][0]
+        self.assertEqual(event["label"], "right_outer_kick")
+        self.assertEqual(event["contact_label_source"], "reviewed_visual_label")
+        self.assertEqual(event["contact_side"], "right")
+        self.assertEqual(event["contact_surface"], "outer")
+        self.assertTrue(event["manual_contact_label"])
+        self.assertEqual(summary["manual_contact_badge_events"], 1)
+        self.assertEqual(summary["manual_contact_side_badges"], 1)
+        self.assertEqual(summary["manual_contact_surface_badges"], 1)
 
 
 if __name__ == "__main__":

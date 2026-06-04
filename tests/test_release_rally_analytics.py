@@ -26,11 +26,18 @@ class ReleaseRallyAnalyticsTests(unittest.TestCase):
                         "start_sec": 0.8,
                         "end_sec": 4.2,
                         "events": [
-                            {"type": "touch", "time_sec": 1.0},
-                            {"type": "touch", "time_sec": 2.0},
-                            {"type": "touch", "time_sec": 4.0},
-                        ],
-                    }
+                                {"type": "touch", "time_sec": 1.0},
+                                {
+                                    "type": "touch",
+                                    "time_sec": 2.0,
+                                    "manual_contact_label": True,
+                                    "contact_type": "kick",
+                                    "contact_side": "left",
+                                    "contact_surface": "inner",
+                                },
+                                {"type": "touch", "time_sec": 4.0},
+                            ],
+                        }
                 ],
             }
             write_json(root / "hud" / "video-test" / "release_touch_hud_events.json", hud_doc)
@@ -64,6 +71,10 @@ class ReleaseRallyAnalyticsTests(unittest.TestCase):
             self.assertEqual(summary["false_negative_times_sec"], [3.0])
             self.assertEqual(len(errors), 3)
             self.assertEqual(summary["best_rally"]["touches"], 3)
+            self.assertEqual(summary["manual_contact_labels"], 1)
+            self.assertEqual(summary["manual_contact_side_labels"], 1)
+            self.assertEqual(summary["manual_contact_surface_labels"], 1)
+            self.assertEqual(summary["rally_rows"][0]["manual_contact_labels"], 1)
 
 
 if __name__ == "__main__":

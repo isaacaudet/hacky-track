@@ -38,6 +38,61 @@ DEFAULT_TRACK_ROOTS = [
 ]
 EVENT_TYPES = {"touch", "drop_floor", "stall"}
 CANDIDATE_CLUSTER_GAP_SEC = 0.04
+CONTACT_SIDES = {"unknown", "left", "right", "center"}
+CONTACT_TYPES = {"unknown", "kick", "foot", "knee", "stall", "drop_floor", "ground", "chest", "hand"}
+CONTACT_SURFACES = {"unknown", "inner", "outer"}
+CONTACT_SIDE_BASES = {"unknown", "wearer_limb", "screen_position", "pose_anatomical", "ambiguous", "legacy_unspecified"}
+TRICK_LABELS = {
+    "",
+    "right_kick",
+    "left_kick",
+    "left_knee",
+    "right_knee",
+    "left_inner_kick",
+    "left_outer_kick",
+    "right_inner_kick",
+    "right_outer_kick",
+    "left_inner_knee",
+    "left_outer_knee",
+    "right_inner_knee",
+    "right_outer_knee",
+    "right_stall",
+    "left_stall",
+    "left_inner_stall",
+    "left_outer_stall",
+    "right_inner_stall",
+    "right_outer_stall",
+    "knee",
+    "clipper",
+    "inner_left",
+    "inner_right",
+    "outer_left",
+    "outer_right",
+    "around_the_world",
+    "around_the_world_outer_right",
+    "around_the_world_outer_left",
+}
+CONTACT_REVIEW_STATUSES = {"unreviewed", "reviewed"}
+
+
+def side_from_trick_label(trick_label: str | None) -> str | None:
+    raw = str(trick_label or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if raw in {"l", "left"} or raw.startswith("left_") or raw.endswith("_left") or "_left_" in raw:
+        return "left"
+    if raw in {"r", "right"} or raw.startswith("right_") or raw.endswith("_right") or "_right_" in raw:
+        return "right"
+    return None
+
+
+def infer_contact_side_basis(contact_side: str, trick_label: str | None, explicit_basis: str | None = None) -> str:
+    if explicit_basis:
+        return explicit_basis
+    trick_side = side_from_trick_label(trick_label)
+    if contact_side in {"left", "right"} and trick_side == contact_side:
+        return "wearer_limb"
+    if contact_side in {"left", "right"}:
+        return "legacy_unspecified"
+    return "unknown"
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -142,6 +197,21 @@ class TouchReviewStore:
                         }
                         if event.get("duration_sec") is not None:
                             row["duration_sec"] = float(event["duration_sec"])
+                        if event.get("contact_side") not in (None, ""):
+                            row["contact_side"] = str(event["contact_side"])
+                        if event.get("contact_type") not in (None, ""):
+                            row["contact_type"] = str(event["contact_type"])
+                        if event.get("contact_surface") not in (None, ""):
+                            row["contact_surface"] = str(event["contact_surface"])
+                        if event.get("trick_label") not in (None, ""):
+                            row["trick_label"] = str(event["trick_label"])
+                        if event.get("contact_review_status") not in (None, ""):
+                            row["contact_review_status"] = str(event["contact_review_status"])
+                        row["contact_side_basis"] = infer_contact_side_basis(
+                            str(row.get("contact_side") or "unknown"),
+                            str(row.get("trick_label") or ""),
+                            None if event.get("contact_side_basis") in (None, "") else str(event["contact_side_basis"]),
+                        )
                         events.append(row)
         return self.empty_doc(video_id, events)
 
@@ -335,6 +405,33 @@ class TouchReviewStore:
         if missing:
             raise ValueError(f"cannot complete: {missing} unchecked hints")
 
+    @staticmethod
+    def contact_side_basis_stats(events: list[dict[str, Any]]) -> dict[str, int]:
+        approved = [event for event in events if event.get("review_status") == "approved"]
+        classifiable = [event for event in approved if event.get("type") in EVENT_TYPES]
+        wearer = [
+            event
+            for event in classifiable
+            if event.get("contact_side") in {"left", "right"} and event.get("contact_side_basis") == "wearer_limb"
+        ]
+        legacy = [
+            event
+            for event in classifiable
+            if event.get("contact_side") in {"left", "right"}
+            and event.get("contact_side_basis") in {None, "", "unknown", "legacy_unspecified"}
+        ]
+        ambiguous = [
+            event
+            for event in classifiable
+            if event.get("contact_side_basis") in {"ambiguous", "screen_position", "pose_anatomical"}
+        ]
+        return {
+            "contact_classifiable_events": len(classifiable),
+            "wearer_side_events": len(wearer),
+            "legacy_side_basis_events": len(legacy),
+            "ambiguous_side_basis_events": len(ambiguous),
+        }
+
     def state(self) -> dict[str, Any]:
         rows = []
         readiness_rows = []
@@ -359,8 +456,12 @@ class TouchReviewStore:
                 complete = bool(doc.get("candidate_review_complete"))
                 reviewed_hints = sum(1 for row in doc.get("candidate_reviews", []) if row.get("review_status") == "reviewed")
             else:
+                events = []
                 complete = False
                 reviewed_hints = 0
+                approved = 0
+                pending = 0
+            side_basis_stats = self.contact_side_basis_stats(events)
             rows.append(
                 {
                     **item,
@@ -381,6 +482,7 @@ class TouchReviewStore:
                     "audio_only_checked_hints": readiness["audio_only_checked_hint_count"],
                     "audio_only_unchecked_hints": readiness["audio_only_unchecked_hint_count"],
                     "generated_hints": readiness["generated_event_hint_count"],
+                    **side_basis_stats,
                     "review_priority": None,
                     "review_reason": None,
                 }
@@ -406,6 +508,9 @@ class TouchReviewStore:
                 "unchecked_hints": sum(int(row["unchecked_hints"]) for row in rows),
                 "complete_ready_videos": sum(1 for row in rows if row["readiness_status"] == "complete_ready"),
                 "frozen_test_videos": sum(1 for row in rows if row["split"] == "test_frozen"),
+                "wearer_side_events": sum(int(row["wearer_side_events"]) for row in rows),
+                "legacy_side_basis_events": sum(int(row["legacy_side_basis_events"]) for row in rows),
+                "ambiguous_side_basis_events": sum(int(row["ambiguous_side_basis_events"]) for row in rows),
             },
         }
 
@@ -450,6 +555,37 @@ class TouchReviewStore:
                 }
                 if event.get("duration_sec") not in (None, ""):
                     row["duration_sec"] = round(float(event["duration_sec"]), 3)
+                contact_side = str(event.get("contact_side") or "unknown")
+                if contact_side not in CONTACT_SIDES:
+                    raise ValueError(f"unsupported contact_side: {contact_side}")
+                contact_type = str(event.get("contact_type") or "")
+                if not contact_type:
+                    contact_type = "ground" if event_type == "drop_floor" else "stall" if event_type == "stall" else "unknown"
+                if contact_type not in CONTACT_TYPES:
+                    raise ValueError(f"unsupported contact_type: {contact_type}")
+                contact_surface = str(event.get("contact_surface") or "unknown")
+                if contact_surface not in CONTACT_SURFACES:
+                    raise ValueError(f"unsupported contact_surface: {contact_surface}")
+                trick_label = str(event.get("trick_label") or "")
+                if trick_label not in TRICK_LABELS:
+                    raise ValueError(f"unsupported trick_label: {trick_label}")
+                row["contact_side"] = contact_side
+                row["contact_type"] = contact_type
+                row["contact_surface"] = contact_surface
+                contact_side_basis = infer_contact_side_basis(
+                    contact_side,
+                    trick_label,
+                    None if event.get("contact_side_basis") in (None, "") else str(event.get("contact_side_basis")),
+                )
+                if contact_side_basis not in CONTACT_SIDE_BASES:
+                    raise ValueError(f"unsupported contact_side_basis: {contact_side_basis}")
+                row["contact_side_basis"] = contact_side_basis
+                if trick_label:
+                    row["trick_label"] = trick_label
+                contact_review_status = str(event.get("contact_review_status") or "unreviewed")
+                if contact_review_status not in CONTACT_REVIEW_STATUSES:
+                    raise ValueError(f"unsupported contact_review_status: {contact_review_status}")
+                row["contact_review_status"] = contact_review_status
                 clean_events.append(row)
             clean_candidate_reviews: list[dict[str, Any]] = []
             seen_reviews: set[tuple[float, str]] = set()
@@ -746,6 +882,18 @@ HTML = r"""<!doctype html>
     .advanced-panel { margin:10px 0; border:1px solid var(--line); background:#111923; border-radius:8px; overflow:hidden; }
     .advanced-panel summary { cursor:pointer; padding:9px 11px; color:#d7e3f1; font-weight:650; background:#151f2d; }
     .advanced-panel .controls { margin:0; padding:10px; border-top:1px solid #253044; }
+    .classify-panel { padding:10px; border-top:1px solid #253044; background:#0f1824; }
+    .classify-status { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; margin-bottom:8px; color:#cbd6e5; }
+    .classify-status strong { color:var(--text); }
+    .classify-actions { display:grid; grid-template-columns:repeat(6, minmax(0, 1fr)); gap:8px; }
+    .classify-actions button { min-height:42px; font-weight:750; }
+    .classify-actions .kick-left, .classify-actions .kick-right { background:#173823; border-color:#31d07d; }
+    .classify-actions .knee { background:#2c2f48; border-color:#9aa8ff; }
+    .classify-actions .stall { background:#17324a; border-color:#5bb7ff; }
+    .classify-actions .ground { background:#4a2027; border-color:#ff6b6b; }
+    .classify-actions .unknown { background:#263247; border-color:#667896; }
+    .classify-actions .next { background:#473816; border-color:#f8c14a; }
+    .semantic-note { grid-column:1 / -1; color:#c7d3e2; border:1px solid #334156; background:#111923; border-radius:8px; padding:8px 10px; line-height:1.35; }
     .side { background:var(--panel); padding:12px; overflow:auto; max-height:calc(100vh - 52px); border-right:0; }
     .event-row { display:grid; grid-template-columns:64px 1fr auto; gap:8px; align-items:center; padding:8px 0; border-bottom:1px solid #253044; }
     .pill { display:inline-flex; align-items:center; border-radius:999px; padding:2px 7px; font-size:12px; background:#263247; color:#cbd6e5; }
@@ -823,6 +971,113 @@ HTML = r"""<!doctype html>
         <button id="saveComplete" class="primary">Save complete (clip done)</button>
         <button id="saveCompleteNext" class="primary">Save complete + load next</button>
         <button id="deleteEvent" class="danger" disabled>Delete selected event</button>
+      </div>
+    </details>
+    <details class="advanced-panel" open>
+      <summary>v1.0 contact labels for selected event</summary>
+      <div class="classify-panel">
+        <div class="classify-status">
+          <div>
+            <strong id="classificationHeadline">Select an event to classify</strong>
+            <div id="classificationCopy" class="meta">Use the event list, timeline, or Next unclassified.</div>
+          </div>
+          <span id="classificationProgress" class="pill">0/0</span>
+        </div>
+        <div class="classify-actions">
+          <div class="semantic-note"><strong>Side means contacting limb / wearer side.</strong> Do not label side from screen-left or screen-right. Use Unknown/skip when the limb is not clear.</div>
+          <button id="classifyLeftKick" class="kick-left">1 Left kick</button>
+          <button id="classifyLeftInnerKick" class="kick-left">2 Left inner kick</button>
+          <button id="classifyLeftOuterKick" class="kick-left">3 Left outer kick</button>
+          <button id="classifyRightKick" class="kick-right">4 Right kick</button>
+          <button id="classifyRightInnerKick" class="kick-right">5 Right inner kick</button>
+          <button id="classifyRightOuterKick" class="kick-right">6 Right outer kick</button>
+          <button id="classifyLeftKnee" class="knee">7 Left knee</button>
+          <button id="classifyLeftInnerKnee" class="knee">Left inner knee</button>
+          <button id="classifyLeftOuterKnee" class="knee">Left outer knee</button>
+          <button id="classifyRightKnee" class="knee">8 Right knee</button>
+          <button id="classifyRightInnerKnee" class="knee">Right inner knee</button>
+          <button id="classifyRightOuterKnee" class="knee">Right outer knee</button>
+          <button id="classifyLeftStall" class="stall">9 Left stall</button>
+          <button id="classifyLeftInnerStall" class="stall">Left inner stall</button>
+          <button id="classifyLeftOuterStall" class="stall">Left outer stall</button>
+          <button id="classifyRightStall" class="stall">Right stall</button>
+          <button id="classifyRightInnerStall" class="stall">Right inner stall</button>
+          <button id="classifyRightOuterStall" class="stall">Right outer stall</button>
+          <button id="classifyGround" class="ground">G Ground/drop</button>
+          <button id="classifyUnknown" class="unknown">0 Unknown/skip</button>
+          <button id="nextUnclassifiedEvent" class="next">Next unclassified</button>
+          <button id="nextSideBasisReview" class="next">Next side-basis</button>
+          <button id="clearClassification">Clear class</button>
+        </div>
+      </div>
+      <div class="controls">
+        <label>Side
+          <select id="selectedContactSide">
+            <option value="unknown">unknown</option>
+            <option value="left">left</option>
+            <option value="right">right</option>
+            <option value="center">center</option>
+          </select>
+        </label>
+        <label>Side basis
+          <select id="selectedContactSideBasis">
+            <option value="unknown">unknown / not usable</option>
+            <option value="wearer_limb">contacting limb / wearer side</option>
+            <option value="screen_position">screen position only</option>
+            <option value="pose_anatomical">pose anatomical side only</option>
+            <option value="ambiguous">ambiguous</option>
+            <option value="legacy_unspecified">legacy unspecified</option>
+          </select>
+        </label>
+        <label>Type
+          <select id="selectedContactType">
+            <option value="unknown">unknown</option>
+            <option value="kick">kick</option>
+            <option value="foot">foot</option>
+            <option value="knee">knee</option>
+            <option value="stall">stall</option>
+            <option value="drop_floor">drop_floor</option>
+            <option value="ground">ground</option>
+            <option value="chest">chest</option>
+            <option value="hand">hand</option>
+          </select>
+        </label>
+        <label>Surface
+          <select id="selectedContactSurface">
+            <option value="unknown">unknown</option>
+            <option value="inner">inner</option>
+            <option value="outer">outer</option>
+          </select>
+        </label>
+        <label>Trick
+          <select id="selectedTrickLabel">
+            <option value="">none</option>
+            <option value="right_kick">right_kick</option>
+            <option value="left_kick">left_kick</option>
+            <option value="left_knee">left_knee</option>
+            <option value="right_knee">right_knee</option>
+            <option value="left_outer_kick">left_outer_kick</option>
+            <option value="left_inner_kick">left_inner_kick</option>
+            <option value="right_inner_kick">right_inner_kick</option>
+            <option value="right_outer_kick">right_outer_kick</option>
+            <option value="left_outer_knee">left_outer_knee</option>
+            <option value="left_inner_knee">left_inner_knee</option>
+            <option value="right_inner_knee">right_inner_knee</option>
+            <option value="right_outer_knee">right_outer_knee</option>
+            <option value="right_stall">right_stall</option>
+            <option value="left_stall">left_stall</option>
+            <option value="left_inner_stall">left_inner_stall</option>
+            <option value="left_outer_stall">left_outer_stall</option>
+            <option value="right_inner_stall">right_inner_stall</option>
+            <option value="right_outer_stall">right_outer_stall</option>
+            <option value="knee">knee</option>
+            <option value="clipper">clipper</option>
+            <option value="around_the_world">around_the_world</option>
+            <option value="around_the_world_outer_right">around_the_world_outer_right</option>
+            <option value="around_the_world_outer_left">around_the_world_outer_left</option>
+          </select>
+        </label>
+        <span id="contactLabelReadout" class="meta"></span>
       </div>
     </details>
     <div id="timeline" class="timeline"></div>
@@ -912,12 +1167,20 @@ const REVIEW_WINDOW_SEC = 0.35;
 const FRAME_STEP_SEC = 1 / 30;
 
 function fmt(t){ return Number(t).toFixed(3); }
-function eventLabel(e){ return `${fmt(e.time_sec)}s ${e.type}`; }
+function eventLabel(e){
+  const contact = [
+    e.contact_side || "unknown",
+    e.contact_surface || "unknown",
+    e.contact_type || "unknown",
+    e.trick_label || ""
+  ].filter(Boolean).join(" · ");
+  return `${fmt(e.time_sec)}s ${e.type}${contact ? " · " + contact : ""}`;
+}
 async function api(path, options){ const r = await fetch(path, options); if(!r.ok) throw new Error(await r.text()); return r.json(); }
 
 async function loadState(selectFirst=true){
   app.state = await api("/api/state");
-  document.getElementById("summary").textContent = `${app.state.summary.videos} videos | ${app.state.summary.complete_ready_videos} ready | ${app.state.summary.unchecked_hints} unchecked hints | ${app.state.summary.approved_events} approved events | ${app.state.summary.frozen_test_videos} frozen test`;
+  document.getElementById("summary").textContent = `${app.state.summary.videos} videos | ${app.state.summary.complete_ready_videos} ready | ${app.state.summary.unchecked_hints} unchecked hints | ${app.state.summary.approved_events} approved events | wearer-side ${app.state.summary.wearer_side_events} | legacy side ${app.state.summary.legacy_side_basis_events} | ${app.state.summary.frozen_test_videos} frozen test`;
   renderVideoList();
   if(selectFirst && app.state.items.length) await loadVideo(initialVideoId());
 }
@@ -935,17 +1198,36 @@ function orderedItems(){
     const ai = queueIndex.has(a.video_id) ? queueIndex.get(a.video_id) : 9999;
     const bi = queueIndex.has(b.video_id) ? queueIndex.get(b.video_id) : 9999;
     if(ai !== bi) return ai - bi;
+    if(Number(a.legacy_side_basis_events || 0) !== Number(b.legacy_side_basis_events || 0)){
+      return Number(b.legacy_side_basis_events || 0) - Number(a.legacy_side_basis_events || 0);
+    }
     if(a.split !== b.split) return String(a.split).localeCompare(String(b.split));
     return String(a.video_name).localeCompare(String(b.video_name));
   });
+}
+
+function sideBasisQueue(){
+  return [...(app.state.items || [])]
+    .filter(item => Number(item.legacy_side_basis_events || 0) > 0)
+    .sort((a, b) => {
+      const debt = Number(b.legacy_side_basis_events || 0) - Number(a.legacy_side_basis_events || 0);
+      if(debt !== 0) return debt;
+      return String(a.video_name).localeCompare(String(b.video_name));
+    });
 }
 
 function renderQueueCard(){
   const card = document.getElementById("queueCard");
   const next = app.state.review_queue?.[0] || null;
   const nextDifferent = (app.state.review_queue || []).find(row => !app.current || row.video_id !== app.current.video_id) || null;
+  const sideQueue = sideBasisQueue();
+  const sideTarget = sideQueue.find(row => !app.current || row.video_id !== app.current.video_id) || sideQueue[0] || null;
+  const sideLine = sideQueue.length
+    ? `<div class="queue-line">Side-basis debt: ${app.state.summary.legacy_side_basis_events} legacy left/right labels across ${sideQueue.length} clips.</div><button id="loadNextSideBasis" ${sideTarget ? "" : "disabled"}>${sideTarget ? "Load next side-basis clip" : "Current clip has side-basis debt"}</button>`
+    : `<div class="queue-line">Side-basis debt: none.</div>`;
   if(!next){
-    card.innerHTML = `<strong>Review queue</strong><div class="queue-line">All clips are complete-ready.</div>`;
+    card.innerHTML = `<strong>Review queue</strong><div class="queue-line">All clips are complete-ready.</div>${sideLine}`;
+    if(sideTarget) document.getElementById("loadNextSideBasis").onclick = () => loadVideo(sideTarget.video_id);
     return;
   }
   const target = app.current && next.video_id === app.current.video_id ? nextDifferent : next;
@@ -959,8 +1241,10 @@ function renderQueueCard(){
     <div class="queue-line">likely ${next.likely_unchecked_hint_count}/${next.likely_hint_count} · audio-tail ${next.audio_only_unchecked_hint_count}/${next.audio_only_hint_count}</div>
     <div class="queue-line">${next.reason}</div>
     ${currentLine}
-    <button id="loadNextPriority" ${target ? "" : "disabled"}>${target ? buttonText : "No other priority clips"}</button>`;
+    <button id="loadNextPriority" ${target ? "" : "disabled"}>${target ? buttonText : "No other priority clips"}</button>
+    ${sideLine}`;
   if(target) document.getElementById("loadNextPriority").onclick = () => loadVideo(target.video_id);
+  if(sideTarget) document.getElementById("loadNextSideBasis").onclick = () => loadVideo(sideTarget.video_id);
 }
 
 function renderVideoList(){
@@ -971,7 +1255,8 @@ function renderVideoList(){
     const b = document.createElement("button");
     b.className = app.current && app.current.video_id === item.video_id ? "active" : "";
     const priority = item.review_priority === null || item.review_priority === undefined ? "" : `P${item.review_priority} | `;
-    b.innerHTML = `<strong>${item.video_name}</strong><small>${priority}${item.split} | ${item.readiness_status} | hints ${item.checked_hints}/${item.total_hints} | likely left ${item.likely_unchecked_hints} | audio-tail left ${item.audio_only_unchecked_hints} | approved ${item.approved_events} | pending ${item.pending_events}</small>`;
+    const sideDebt = Number(item.legacy_side_basis_events || 0) ? ` | side-basis ${item.wearer_side_events}/${item.legacy_side_basis_events} wearer/legacy` : ` | wearer-side ${item.wearer_side_events}`;
+    b.innerHTML = `<strong>${item.video_name}</strong><small>${priority}${item.split} | ${item.readiness_status} | hints ${item.checked_hints}/${item.total_hints} | likely left ${item.likely_unchecked_hints} | audio-tail left ${item.audio_only_unchecked_hints} | approved ${item.approved_events} | pending ${item.pending_events}${sideDebt}</small>`;
     b.onclick = () => loadVideo(item.video_id);
     list.appendChild(b);
   });
@@ -1638,18 +1923,337 @@ function renderTimeline(){
 function renderEvents(){
   const root = document.getElementById("events");
   root.innerHTML = "";
-  if(!app.events.length){ root.innerHTML = `<div class="empty">No reviewed events yet.</div>`; return; }
+  if(!app.events.length){
+    root.innerHTML = `<div class="empty">No reviewed events yet.</div>`;
+    renderContactLabelControls();
+    return;
+  }
   app.events.sort((a,b)=>Number(a.time_sec)-Number(b.time_sec));
   app.events.forEach((e, i) => {
     const row = document.createElement("div");
     row.className = "event-row";
     row.style.background = app.selected === i ? "#22314a" : "transparent";
-    row.innerHTML = `<button>${fmt(e.time_sec)}s</button><span>${e.type}<br><small class="meta">${e.review_status || "approved"}</small></span><button data-i="${i}">go</button>`;
+    const basis = e.contact_side_basis && e.contact_side_basis !== "unknown" ? `basis:${e.contact_side_basis}` : "";
+    const contact = [e.contact_side || "unknown", basis, e.contact_surface || "unknown", e.contact_type || "unknown", e.trick_label || ""].filter(Boolean).join(" · ");
+    row.innerHTML = `<button>${fmt(e.time_sec)}s</button><span>${e.type}<br><small class="meta">${e.review_status || "approved"} · ${contact}</small></span><button data-i="${i}">go</button>`;
     row.onclick = () => { app.selected = i; video.currentTime = Number(e.time_sec); renderAll(); };
     root.appendChild(row);
   });
   document.getElementById("deleteEvent").disabled = app.selected === null;
+  renderContactLabelControls();
   renderUndoControls();
+}
+
+function selectedEvent(){
+  if(app.selected === null || app.selected === undefined) return null;
+  return app.events[app.selected] || null;
+}
+
+function contactDefaultsForType(type){
+  if(type === "drop_floor") return {contact_side:"unknown", contact_side_basis:"unknown", contact_type:"ground", contact_surface:"unknown", trick_label:""};
+  if(type === "stall") return {contact_side:"unknown", contact_side_basis:"unknown", contact_type:"stall", contact_surface:"unknown", trick_label:""};
+  return {contact_side:"unknown", contact_side_basis:"unknown", contact_type:"unknown", contact_surface:"unknown", trick_label:""};
+}
+
+function applyContactDefaults(row){
+  const defaults = contactDefaultsForType(row.type);
+  row.contact_side = row.contact_side || defaults.contact_side;
+  if(!row.contact_side_basis && (row.contact_side === "left" || row.contact_side === "right")){
+    row.contact_side_basis = "legacy_unspecified";
+  } else {
+    row.contact_side_basis = row.contact_side_basis || defaults.contact_side_basis;
+  }
+  row.contact_type = row.contact_type || defaults.contact_type;
+  row.contact_surface = row.contact_surface || defaults.contact_surface;
+  row.trick_label = row.trick_label || defaults.trick_label;
+  row.contact_review_status = row.contact_review_status || "unreviewed";
+  return row;
+}
+
+function renderContactLabelControls(){
+  const item = selectedEvent();
+  const side = document.getElementById("selectedContactSide");
+  const sideBasis = document.getElementById("selectedContactSideBasis");
+  const type = document.getElementById("selectedContactType");
+  const surface = document.getElementById("selectedContactSurface");
+  const trick = document.getElementById("selectedTrickLabel");
+  const readout = document.getElementById("contactLabelReadout");
+  const disabled = !item;
+  [side, sideBasis, type, surface, trick].forEach(control => { if(control) control.disabled = disabled; });
+  if(!item){
+    if(side) side.value = "unknown";
+    if(sideBasis) sideBasis.value = "unknown";
+    if(type) type.value = "unknown";
+    if(surface) surface.value = "unknown";
+    if(trick) trick.value = "";
+    if(readout) readout.textContent = "Select an event to label side/type.";
+    renderClassificationPanel();
+    return;
+  }
+  applyContactDefaults(item);
+  if(side) side.value = item.contact_side || "unknown";
+  if(sideBasis) sideBasis.value = item.contact_side_basis || "unknown";
+  if(type) type.value = item.contact_type || "unknown";
+  if(surface) surface.value = item.contact_surface || "unknown";
+  if(trick) trick.value = item.trick_label || "";
+  if(readout) readout.textContent = `${item.type} @ ${fmt(item.time_sec)}s`;
+  renderClassificationPanel();
+}
+
+function inferTrickLabel(side, contactType, contactSurface="unknown"){
+  if(side !== "left" && side !== "right") return "";
+  if((contactType === "kick" || contactType === "foot" || contactType === "knee" || contactType === "stall") && (contactSurface === "inner" || contactSurface === "outer")){
+    const normalizedType = contactType === "foot" ? "kick" : contactType;
+    return `${side}_${contactSurface}_${normalizedType}`;
+  }
+  if(contactType === "stall") return `${side}_stall`;
+  if(contactType === "kick" || contactType === "foot") return `${side}_kick`;
+  if(contactType === "knee") return `${side}_knee`;
+  return "";
+}
+
+function updateSelectedContactField(field, value){
+  const item = selectedEvent();
+  if(!item) return;
+  pushUndo(`set ${field}`);
+  applyContactDefaults(item);
+  item[field] = value;
+  if(field === "contact_side" && (value === "left" || value === "right") && (!item.contact_side_basis || item.contact_side_basis === "unknown")){
+    item.contact_side_basis = "wearer_limb";
+  }
+  item.contact_review_status = "reviewed";
+  if(field === "contact_side" || field === "contact_type" || field === "contact_surface"){
+    const suggested = inferTrickLabel(item.contact_side, item.contact_type, item.contact_surface);
+    if(suggested && !item.trick_label) item.trick_label = suggested;
+  }
+  markDirty(`updated ${field}`);
+  renderAll();
+}
+
+function classifiableEvents(){
+  return app.events.filter(event => (event.review_status || "approved") === "approved" && ["touch", "stall", "drop_floor"].includes(event.type));
+}
+
+function sideBasisIsExplicitWearer(event){
+  return (event.contact_side === "left" || event.contact_side === "right") && event.contact_side_basis === "wearer_limb";
+}
+
+function sideBasisNeedsReview(event){
+  const side = event.contact_side || "unknown";
+  const basis = event.contact_side_basis || "unknown";
+  return (side === "left" || side === "right") && (basis === "unknown" || basis === "legacy_unspecified");
+}
+
+function hasUsefulContactLabel(event){
+  const side = event.contact_side || "unknown";
+  const sideBasis = event.contact_side_basis || "unknown";
+  const type = event.contact_type || "unknown";
+  const surface = event.contact_surface || "unknown";
+  const trainableSide = (side === "left" || side === "right") && sideBasis === "wearer_limb";
+  return trainableSide || surface === "inner" || surface === "outer" || !["", "unknown"].includes(type) || Boolean(event.trick_label);
+}
+
+function eventContactClassified(event){
+  return event.contact_review_status === "reviewed" || hasUsefulContactLabel(event);
+}
+
+function contactClassificationStats(){
+  const events = classifiableEvents();
+  const classified = events.filter(eventContactClassified);
+  const usable = events.filter(hasUsefulContactLabel);
+  const wearerSide = events.filter(sideBasisIsExplicitWearer);
+  const sideBasisNeeds = events.filter(sideBasisNeedsReview);
+  return {
+    total: events.length,
+    classified: classified.length,
+    unclassified: Math.max(0, events.length - classified.length),
+    usable: usable.length,
+    wearerSide: wearerSide.length,
+    sideBasisNeeds: sideBasisNeeds.length
+  };
+}
+
+function renderClassificationPanel(){
+  const item = selectedEvent();
+  const stats = contactClassificationStats();
+  const headline = document.getElementById("classificationHeadline");
+  const copy = document.getElementById("classificationCopy");
+  const progress = document.getElementById("classificationProgress");
+  const buttons = [
+    "classifyLeftKick",
+    "classifyLeftOuterKick",
+    "classifyLeftInnerKick",
+    "classifyRightKick",
+    "classifyRightInnerKick",
+    "classifyRightOuterKick",
+    "classifyLeftKnee",
+    "classifyLeftOuterKnee",
+    "classifyLeftInnerKnee",
+    "classifyRightKnee",
+    "classifyRightInnerKnee",
+    "classifyRightOuterKnee",
+    "classifyLeftStall",
+    "classifyLeftInnerStall",
+    "classifyLeftOuterStall",
+    "classifyRightStall",
+    "classifyRightInnerStall",
+    "classifyRightOuterStall",
+    "classifyGround",
+    "classifyUnknown",
+    "clearClassification"
+  ].map(id => document.getElementById(id)).filter(Boolean);
+  buttons.forEach(button => { button.disabled = !item; });
+  const nextButton = document.getElementById("nextUnclassifiedEvent");
+  if(nextButton) nextButton.disabled = stats.unclassified === 0;
+  const nextSideBasisButton = document.getElementById("nextSideBasisReview");
+  if(nextSideBasisButton) nextSideBasisButton.disabled = stats.sideBasisNeeds === 0;
+  if(progress) progress.textContent = `${stats.classified}/${stats.total} classified · ${stats.wearerSide} wearer-side · ${stats.sideBasisNeeds} side-basis todo`;
+  if(!item){
+    if(headline) headline.textContent = "Select an event to classify";
+    if(copy) copy.textContent = stats.unclassified ? `${stats.unclassified} events still need a side/type decision.` : "No classifiable events in this clip.";
+    return;
+  }
+  const state = eventContactClassified(item) ? "classified" : "needs class";
+  if(headline) headline.textContent = `${eventLabel(item)} · ${state}`;
+  if(copy) copy.textContent = sideBasisNeedsReview(item)
+    ? "This event has a legacy left/right label. Confirm it is the contacting limb side, or mark it ambiguous/unknown."
+    : "Use one button. The UI saves a draft and moves to the next unclassified event.";
+}
+
+function setSelectedEventIndex(index, replay=false, message=null){
+  if(index < 0 || index >= app.events.length) return false;
+  app.selected = index;
+  const item = app.events[index];
+  if(replay){
+    playEventWindow(item, message || `classify ${fmt(item.time_sec)}s`);
+  } else {
+    video.pause();
+    video.currentTime = Number(item.time_sec);
+    setStatus(message || `event ${fmt(item.time_sec)}s`);
+    renderAll();
+  }
+  return true;
+}
+
+function nextUnclassifiedEventIndex(){
+  if(!app.events.length) return -1;
+  const start = app.selected === null || app.selected === undefined ? -1 : app.selected;
+  for(let offset = 1; offset <= app.events.length; offset += 1){
+    const index = (start + offset + app.events.length) % app.events.length;
+    const event = app.events[index];
+    if(["touch", "stall", "drop_floor"].includes(event.type) && !eventContactClassified(event)) return index;
+  }
+  return -1;
+}
+
+function nextSideBasisReviewIndex(){
+  if(!app.events.length) return -1;
+  const start = app.selected === null || app.selected === undefined ? -1 : app.selected;
+  for(let offset = 1; offset <= app.events.length; offset += 1){
+    const index = (start + offset + app.events.length) % app.events.length;
+    const event = app.events[index];
+    if(["touch", "stall"].includes(event.type) && sideBasisNeedsReview(event)) return index;
+  }
+  return -1;
+}
+
+function stepUnclassifiedEvent(){
+  const index = nextUnclassifiedEventIndex();
+  if(index < 0){
+    setStatus("all events classified or intentionally skipped");
+    renderAll();
+    return false;
+  }
+  return setSelectedEventIndex(index, true, "next unclassified event");
+}
+
+function stepSideBasisReview(){
+  const index = nextSideBasisReviewIndex();
+  if(index < 0){
+    setStatus("no legacy side labels need side-basis review");
+    renderAll();
+    return false;
+  }
+  return setSelectedEventIndex(index, true, "next side-basis review");
+}
+
+function playEventWindow(event, message){
+  const center = Number(event.time_sec);
+  app.replayCenter = center;
+  app.replayUntil = center + REVIEW_WINDOW_SEC;
+  video.currentTime = Math.max(0, center - REVIEW_WINDOW_SEC);
+  video.playbackRate = Number(document.getElementById("playbackRate").value || 0.5);
+  enforceMuted();
+  setStatus(message || `replay event ${fmt(center)}s`);
+  renderAll();
+  const promise = video.play();
+  if(promise && typeof promise.catch === "function"){
+    promise.catch(() => {
+      app.replayUntil = null;
+      app.replayCenter = null;
+      video.currentTime = center;
+      setStatus(`ready ${fmt(center)}s`);
+      renderAll();
+    });
+  }
+}
+
+function classificationPreset(preset){
+  if(preset === "left_kick") return {contact_side:"left", contact_side_basis:"wearer_limb", contact_type:"kick", contact_surface:"unknown", trick_label:"left_kick"};
+  if(preset === "left_inner_kick") return {contact_side:"left", contact_side_basis:"wearer_limb", contact_type:"kick", contact_surface:"inner", trick_label:"left_inner_kick"};
+  if(preset === "left_outer_kick") return {contact_side:"left", contact_side_basis:"wearer_limb", contact_type:"kick", contact_surface:"outer", trick_label:"left_outer_kick"};
+  if(preset === "right_kick") return {contact_side:"right", contact_side_basis:"wearer_limb", contact_type:"kick", contact_surface:"unknown", trick_label:"right_kick"};
+  if(preset === "right_inner_kick") return {contact_side:"right", contact_side_basis:"wearer_limb", contact_type:"kick", contact_surface:"inner", trick_label:"right_inner_kick"};
+  if(preset === "right_outer_kick") return {contact_side:"right", contact_side_basis:"wearer_limb", contact_type:"kick", contact_surface:"outer", trick_label:"right_outer_kick"};
+  if(preset === "left_knee") return {contact_side:"left", contact_side_basis:"wearer_limb", contact_type:"knee", contact_surface:"unknown", trick_label:"left_knee"};
+  if(preset === "left_inner_knee") return {contact_side:"left", contact_side_basis:"wearer_limb", contact_type:"knee", contact_surface:"inner", trick_label:"left_inner_knee"};
+  if(preset === "left_outer_knee") return {contact_side:"left", contact_side_basis:"wearer_limb", contact_type:"knee", contact_surface:"outer", trick_label:"left_outer_knee"};
+  if(preset === "right_knee") return {contact_side:"right", contact_side_basis:"wearer_limb", contact_type:"knee", contact_surface:"unknown", trick_label:"right_knee"};
+  if(preset === "right_inner_knee") return {contact_side:"right", contact_side_basis:"wearer_limb", contact_type:"knee", contact_surface:"inner", trick_label:"right_inner_knee"};
+  if(preset === "right_outer_knee") return {contact_side:"right", contact_side_basis:"wearer_limb", contact_type:"knee", contact_surface:"outer", trick_label:"right_outer_knee"};
+  if(preset === "left_stall") return {contact_side:"left", contact_side_basis:"wearer_limb", contact_type:"stall", contact_surface:"unknown", trick_label:"left_stall"};
+  if(preset === "left_inner_stall") return {contact_side:"left", contact_side_basis:"wearer_limb", contact_type:"stall", contact_surface:"inner", trick_label:"left_inner_stall"};
+  if(preset === "left_outer_stall") return {contact_side:"left", contact_side_basis:"wearer_limb", contact_type:"stall", contact_surface:"outer", trick_label:"left_outer_stall"};
+  if(preset === "right_stall") return {contact_side:"right", contact_side_basis:"wearer_limb", contact_type:"stall", contact_surface:"unknown", trick_label:"right_stall"};
+  if(preset === "right_inner_stall") return {contact_side:"right", contact_side_basis:"wearer_limb", contact_type:"stall", contact_surface:"inner", trick_label:"right_inner_stall"};
+  if(preset === "right_outer_stall") return {contact_side:"right", contact_side_basis:"wearer_limb", contact_type:"stall", contact_surface:"outer", trick_label:"right_outer_stall"};
+  if(preset === "ground") return {contact_side:"unknown", contact_side_basis:"unknown", contact_type:"ground", contact_surface:"unknown", trick_label:""};
+  return {contact_side:"unknown", contact_side_basis:"ambiguous", contact_type:"unknown", contact_surface:"unknown", trick_label:""};
+}
+
+function classifySelectedEvent(preset, advance=true){
+  const item = selectedEvent();
+  if(!item){
+    stepUnclassifiedEvent();
+    return false;
+  }
+  pushUndo(`classify ${preset}`);
+  const values = classificationPreset(preset);
+  item.contact_side = values.contact_side;
+  item.contact_side_basis = values.contact_side_basis;
+  item.contact_type = values.contact_type;
+  item.contact_surface = values.contact_surface;
+  item.trick_label = values.trick_label;
+  item.contact_review_status = "reviewed";
+  markDirty(`classified ${preset}`);
+  if(advance) stepUnclassifiedEvent();
+  else renderAll();
+  return true;
+}
+
+function clearSelectedClassification(){
+  const item = selectedEvent();
+  if(!item) return;
+  pushUndo("clear classification");
+  const defaults = contactDefaultsForType(item.type);
+  item.contact_side = defaults.contact_side;
+  item.contact_side_basis = defaults.contact_side_basis || "unknown";
+  item.contact_type = defaults.contact_type;
+  item.contact_surface = defaults.contact_surface;
+  item.trick_label = defaults.trick_label;
+  item.contact_review_status = "unreviewed";
+  markDirty("classification cleared");
+  renderAll();
 }
 
 function renderCandidates(){
@@ -1684,6 +2288,7 @@ function renderCandidates(){
 function renderReviewProgress(){
   const root = document.getElementById("reviewProgress");
   const stats = candidateReviewStats();
+  const classStats = contactClassificationStats();
   const completeClass = stats.unchecked === 0 ? "ready" : "blocked";
   const completeText = stats.unchecked === 0 ? "ready" : `${stats.unchecked} left`;
   const saveComplete = document.getElementById("saveComplete");
@@ -1699,6 +2304,8 @@ function renderReviewProgress(){
     <div class="progress-row"><span>Likely/model checked</span><strong>${stats.likelyChecked}/${stats.likelyTotal}</strong></div>
     <div class="progress-row"><span>Audio-only checked</span><strong>${stats.audioOnlyChecked}/${stats.audioOnlyTotal}</strong></div>
     <div class="progress-row"><span>Touch / no-touch reviews</span><strong>${stats.touchReviews}/${stats.noTouchReviews}</strong></div>
+    <div class="progress-row ${classStats.unclassified === 0 ? "ready" : "blocked"}"><span>v1.0 side/type classified</span><strong>${classStats.classified}/${classStats.total}</strong></div>
+    <div class="progress-row ${classStats.sideBasisNeeds === 0 ? "ready" : "blocked"}"><span>Wearer-side basis labels</span><strong>${classStats.wearerSide} usable · ${classStats.sideBasisNeeds} legacy left/right</strong></div>
     <div class="progress-row ${completeClass}"><span>Save complete</span><strong>${completeText}</strong></div>
   `;
 }
@@ -1788,7 +2395,7 @@ function renderAll(){
 function addEvent(type, advance=false){
   const time = Number(video.currentTime || 0);
   pushUndo(`add ${type}`);
-  const row = { type, time_sec: Number(time.toFixed(3)), review_status:"approved", source:"muted_visual_review" };
+  const row = applyContactDefaults({ type, time_sec: Number(time.toFixed(3)), review_status:"approved", source:"muted_visual_review" });
   if(type === "stall") row.duration_sec = 0.5;
   app.events.push(row);
   markDirty();
@@ -1823,7 +2430,7 @@ function addTouchForCandidate(candidate, advance=false){
   if(!candidate) return false;
   pushUndo("mark touch");
   const time = Number(candidate.time_sec);
-  const row = { type:"touch", time_sec: Number(time.toFixed(3)), review_status:"approved", source:"muted_visual_review" };
+  const row = applyContactDefaults({ type:"touch", time_sec: Number(time.toFixed(3)), review_status:"approved", source:"muted_visual_review" });
   app.events.push(row);
   app.selected = app.events.length - 1;
   setCandidateReviewFor(candidate, "touch");
@@ -2023,6 +2630,34 @@ document.getElementById("replayHint").onclick = replayHintWindow;
 document.getElementById("autoReplay").onchange = (event) => { app.autoReplay = Boolean(event.target.checked); };
 document.getElementById("frameBack").onclick = () => frameStep(-1);
 document.getElementById("frameForward").onclick = () => frameStep(1);
+document.getElementById("selectedContactSide").onchange = (event) => updateSelectedContactField("contact_side", event.target.value);
+document.getElementById("selectedContactSideBasis").onchange = (event) => updateSelectedContactField("contact_side_basis", event.target.value);
+document.getElementById("selectedContactType").onchange = (event) => updateSelectedContactField("contact_type", event.target.value);
+document.getElementById("selectedContactSurface").onchange = (event) => updateSelectedContactField("contact_surface", event.target.value);
+document.getElementById("selectedTrickLabel").onchange = (event) => updateSelectedContactField("trick_label", event.target.value);
+document.getElementById("classifyLeftKick").onclick = () => classifySelectedEvent("left_kick");
+document.getElementById("classifyRightKick").onclick = () => classifySelectedEvent("right_kick");
+document.getElementById("classifyLeftOuterKick").onclick = () => classifySelectedEvent("left_outer_kick");
+document.getElementById("classifyLeftInnerKick").onclick = () => classifySelectedEvent("left_inner_kick");
+document.getElementById("classifyRightInnerKick").onclick = () => classifySelectedEvent("right_inner_kick");
+document.getElementById("classifyRightOuterKick").onclick = () => classifySelectedEvent("right_outer_kick");
+document.getElementById("classifyLeftKnee").onclick = () => classifySelectedEvent("left_knee");
+document.getElementById("classifyRightKnee").onclick = () => classifySelectedEvent("right_knee");
+document.getElementById("classifyLeftOuterKnee").onclick = () => classifySelectedEvent("left_outer_knee");
+document.getElementById("classifyLeftInnerKnee").onclick = () => classifySelectedEvent("left_inner_knee");
+document.getElementById("classifyRightInnerKnee").onclick = () => classifySelectedEvent("right_inner_knee");
+document.getElementById("classifyRightOuterKnee").onclick = () => classifySelectedEvent("right_outer_knee");
+document.getElementById("classifyLeftStall").onclick = () => classifySelectedEvent("left_stall");
+document.getElementById("classifyLeftInnerStall").onclick = () => classifySelectedEvent("left_inner_stall");
+document.getElementById("classifyLeftOuterStall").onclick = () => classifySelectedEvent("left_outer_stall");
+document.getElementById("classifyRightStall").onclick = () => classifySelectedEvent("right_stall");
+document.getElementById("classifyRightInnerStall").onclick = () => classifySelectedEvent("right_inner_stall");
+document.getElementById("classifyRightOuterStall").onclick = () => classifySelectedEvent("right_outer_stall");
+document.getElementById("classifyGround").onclick = () => classifySelectedEvent("ground");
+document.getElementById("classifyUnknown").onclick = () => classifySelectedEvent("unknown");
+document.getElementById("nextUnclassifiedEvent").onclick = stepUnclassifiedEvent;
+document.getElementById("nextSideBasisReview").onclick = stepSideBasisReview;
+document.getElementById("clearClassification").onclick = clearSelectedClassification;
 document.getElementById("playbackRate").onchange = applyPlaybackRate;
 video.addEventListener("timeupdate", () => { renderTimeline(); renderTrackGraph(); stopReplayIfNeeded(); });
 trackGraph.addEventListener("click", (event) => {
@@ -2061,6 +2696,18 @@ window.addEventListener("keydown", (event) => {
   if(event.key === "r") replayHintWindow();
   if(event.key === "[") frameStep(-1);
   if(event.key === "]") frameStep(1);
+  if(event.key === "1") { event.preventDefault(); classifySelectedEvent("left_kick"); }
+  if(event.key === "2") { event.preventDefault(); classifySelectedEvent("left_inner_kick"); }
+  if(event.key === "3") { event.preventDefault(); classifySelectedEvent("left_outer_kick"); }
+  if(event.key === "4") { event.preventDefault(); classifySelectedEvent("right_kick"); }
+  if(event.key === "5") { event.preventDefault(); classifySelectedEvent("right_inner_kick"); }
+  if(event.key === "6") { event.preventDefault(); classifySelectedEvent("right_outer_kick"); }
+  if(event.key === "7") { event.preventDefault(); classifySelectedEvent("left_knee"); }
+  if(event.key === "8") { event.preventDefault(); classifySelectedEvent("right_knee"); }
+  if(event.key === "9") { event.preventDefault(); classifySelectedEvent("left_stall"); }
+  if(event.key === "g" || event.key === "G") { event.preventDefault(); classifySelectedEvent("ground"); }
+  if(event.key === "0") { event.preventDefault(); classifySelectedEvent("unknown"); }
+  if(event.key === "m") { event.preventDefault(); stepUnclassifiedEvent(); }
   if(event.key === " ") { event.preventDefault(); video.paused ? video.play() : video.pause(); }
 });
 loadState().catch(err => { document.body.innerHTML = `<pre>${err.stack || err}</pre>`; });

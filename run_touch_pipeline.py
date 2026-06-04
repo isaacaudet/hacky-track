@@ -19,6 +19,8 @@ from attach_touch_l2_features import attach_dataset
 from attach_touch_audio_features import attach_dataset as attach_audio_dataset
 from attach_touch_flow_features import attach_dataset as attach_flow_dataset
 from attach_touch_pose_features import attach_dataset as attach_pose_dataset
+from attach_touch_visual_crop_features import attach_dataset as attach_visual_crop_dataset
+from attach_touch_vision_embedding_features import attach_dataset as attach_vision_embedding_dataset
 from build_touch_review_candidates import AUDIO_DELTA, AUDIO_WAIT_SEC, build_candidates
 from build_touch_training_table import build_training_table
 from export_touch_owlv2_detections import export_detections
@@ -137,6 +139,48 @@ def flow_feature_summary_for_status(manifest: dict[str, Any] | None) -> dict[str
     }
 
 
+def visual_crop_feature_summary_for_status(manifest: dict[str, Any] | None) -> dict[str, Any]:
+    if not manifest:
+        return {
+            "status": "skipped",
+            "train_val_rows": 0,
+            "train_val_ok_rows": 0,
+            "test_frozen_rows": 0,
+            "test_frozen_ok_rows": 0,
+        }
+    return {
+        "status": manifest.get("status"),
+        "train_val_rows": (manifest.get("train_val") or {}).get("rows", 0),
+        "train_val_ok_rows": (manifest.get("train_val") or {}).get("ok_rows", 0),
+        "test_frozen_rows": (manifest.get("test_frozen") or {}).get("rows", 0),
+        "test_frozen_ok_rows": (manifest.get("test_frozen") or {}).get("ok_rows", 0),
+    }
+
+
+def vision_embedding_feature_summary_for_status(manifest: dict[str, Any] | None) -> dict[str, Any]:
+    if not manifest:
+        return {
+            "status": "skipped",
+            "train_val_rows": 0,
+            "train_val_requested_rows": 0,
+            "train_val_ok_rows": 0,
+            "test_frozen_rows": 0,
+            "test_frozen_requested_rows": 0,
+            "test_frozen_ok_rows": 0,
+        }
+    return {
+        "status": manifest.get("status"),
+        "model_name": manifest.get("model_name"),
+        "contact_labeled_only": manifest.get("contact_labeled_only"),
+        "train_val_rows": (manifest.get("train_val") or {}).get("rows", 0),
+        "train_val_requested_rows": (manifest.get("train_val") or {}).get("requested_rows", 0),
+        "train_val_ok_rows": (manifest.get("train_val") or {}).get("ok_rows", 0),
+        "test_frozen_rows": (manifest.get("test_frozen") or {}).get("rows", 0),
+        "test_frozen_requested_rows": (manifest.get("test_frozen") or {}).get("requested_rows", 0),
+        "test_frozen_ok_rows": (manifest.get("test_frozen") or {}).get("ok_rows", 0),
+    }
+
+
 def should_run_diagnostic_classifier(classifier_summary: dict[str, Any], *, audio_only: bool) -> bool:
     """Train a non-release diagnostic model when frozen-test labels are the only hard blocker."""
     if audio_only or classifier_summary.get("status") != "not_ready":
@@ -196,6 +240,12 @@ def write_report(path: Path, summary: dict[str, Any]) -> None:
         f"- Optical-flow train/test rows: `{summary['flow_features'].get('train_val_ok_rows')}` / `{summary['flow_features'].get('test_frozen_ok_rows')}`",
         f"- Pose feature status: `{summary['pose_features'].get('status')}`",
         f"- Pose train/test foot-present rows: `{summary['pose_features'].get('train_val_foot_present_rows')}` / `{summary['pose_features'].get('test_frozen_foot_present_rows')}`",
+        f"- Visual-crop status: `{summary['visual_crop_features'].get('status')}`",
+        f"- Visual-crop train/test rows: `{summary['visual_crop_features'].get('train_val_ok_rows')}` / `{summary['visual_crop_features'].get('test_frozen_ok_rows')}`",
+        f"- Vision-embedding status: `{summary['vision_embedding_features'].get('status')}`",
+        f"- Vision-embedding train/test requested/ok rows: "
+        f"`{summary['vision_embedding_features'].get('train_val_requested_rows')}` / `{summary['vision_embedding_features'].get('train_val_ok_rows')}` and "
+        f"`{summary['vision_embedding_features'].get('test_frozen_requested_rows')}` / `{summary['vision_embedding_features'].get('test_frozen_ok_rows')}`",
         f"- Classifier status: `{train_status}`",
         f"- Diagnostic classifier status: `{diagnostic.get('status')}`",
         "",
@@ -528,6 +578,47 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         )
     pose_summary = pose_feature_summary_for_status(pose_manifest)
 
+    visual_crop_manifest: dict[str, Any] | None = None
+    if args.attach_visual_crop_features:
+        visual_crop_manifest = attach_visual_crop_dataset(
+            argparse.Namespace(
+                dataset_dir=l2_out_dir,
+                out_dir=l2_out_dir,
+                review_manifest=review_manifest_path,
+                detections_jsonl=detection_jsonls,
+                detections_dir=args.detections_dir,
+                threshold=args.trajectory_threshold,
+                ball_tolerance_sec=args.visual_crop_ball_tolerance_sec,
+                crop_size_px=args.visual_crop_size_px,
+                grid_size=args.visual_crop_grid_size,
+                cache_path=args.visual_crop_cache_path,
+            )
+        )
+    visual_crop_summary = visual_crop_feature_summary_for_status(visual_crop_manifest)
+
+    vision_embedding_manifest: dict[str, Any] | None = None
+    if args.attach_vision_embedding_features:
+        vision_embedding_manifest = attach_vision_embedding_dataset(
+            argparse.Namespace(
+                dataset_dir=l2_out_dir,
+                out_dir=l2_out_dir,
+                review_manifest=review_manifest_path,
+                labels_dir=labels_dir,
+                detections_jsonl=detection_jsonls,
+                detections_dir=args.detections_dir,
+                threshold=args.trajectory_threshold,
+                ball_tolerance_sec=args.vision_embedding_ball_tolerance_sec,
+                crop_size_px=args.vision_embedding_crop_size_px,
+                batch_size=args.vision_embedding_batch_size,
+                model_name=args.vision_embedding_model,
+                device=args.vision_embedding_device,
+                cache_path=args.vision_embedding_cache_path,
+                contact_labeled_only=args.vision_embedding_contact_labeled_only,
+                label_match_tolerance_sec=args.touch_tolerance_sec,
+            )
+        )
+    vision_embedding_summary = vision_embedding_feature_summary_for_status(vision_embedding_manifest)
+
     release_disable = release_feature_disable_flags(args)
     classifier_summary = train_classifier(
         argparse.Namespace(
@@ -589,6 +680,8 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             "audio_feature_manifest": str(dataset_dir / "touch_audio_feature_manifest.json"),
             "flow_feature_manifest": str(dataset_dir / "touch_flow_feature_manifest.json"),
             "pose_feature_manifest": str(dataset_dir / "touch_pose_feature_manifest.json"),
+            "visual_crop_feature_manifest": str(dataset_dir / "touch_visual_crop_feature_manifest.json"),
+            "vision_embedding_feature_manifest": str(dataset_dir / "touch_vision_embedding_feature_manifest.json"),
         },
         "corpus": inventory["summary"],
         "review_manifest": review_manifest["summary"],
@@ -630,6 +723,8 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         "audio_features": audio_summary,
         "flow_features": flow_summary,
         "pose_features": pose_summary,
+        "visual_crop_features": visual_crop_summary,
+        "vision_embedding_features": vision_embedding_summary,
         "release_gate": release_gate,
         "classifier": {
             "status": classifier_summary["status"],
@@ -729,6 +824,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pose-ball-tolerance-sec", type=float, default=0.08)
     parser.add_argument("--pose-cache-path", type=Path)
     parser.add_argument("--pose-cache-only", action="store_true", help="attach only pose rows already in the pose cache")
+    parser.add_argument("--attach-visual-crop-features", action="store_true", help="attach cached ball-centered visual crop descriptors for contact side/surface classification")
+    parser.add_argument("--visual-crop-ball-tolerance-sec", type=float, default=0.08)
+    parser.add_argument("--visual-crop-size-px", type=int, default=224)
+    parser.add_argument("--visual-crop-grid-size", type=int, default=6)
+    parser.add_argument("--visual-crop-cache-path", type=Path)
+    parser.add_argument("--attach-vision-embedding-features", action="store_true", help="attach frozen OWLv2 crop embeddings for v1.0 contact classification")
+    parser.add_argument("--vision-embedding-ball-tolerance-sec", type=float, default=0.08)
+    parser.add_argument("--vision-embedding-crop-size-px", type=int, default=224)
+    parser.add_argument("--vision-embedding-batch-size", type=int, default=4)
+    parser.add_argument("--vision-embedding-model", choices=["owlv2", "owlv2-large"], default="owlv2")
+    parser.add_argument("--vision-embedding-device", default="mps")
+    parser.add_argument("--vision-embedding-cache-path", type=Path)
+    parser.add_argument("--vision-embedding-contact-labeled-only", action="store_true", help="compute embeddings only for rows with reviewed contact labels")
     parser.add_argument("--classifier-threshold", type=float, default=0.5)
     parser.add_argument("--min-videos", type=int, default=3)
     parser.add_argument("--allow-small-train", action="store_true")

@@ -26,6 +26,7 @@ DEFAULT_DATASET_DIR = ROOT / "runs/release-27-public/touch_corpus_v1/touch_train
 DEFAULT_REVIEW_MANIFEST = ROOT / "runs/release-27-public/touch_corpus_v1/touch_review_manifest.json"
 DEFAULT_THRESHOLD = 0.2
 DEFAULT_BALL_TOLERANCE_SEC = 0.08
+POSE_FEATURE_CACHE_VERSION = 2
 
 LOWER_KPTS = {
     13: "left_knee",
@@ -49,6 +50,23 @@ FOOT_KPTS = {
     21: "right_small_toe",
     22: "right_heel",
 }
+FOOT_SIDE_KPTS = {
+    "left": {
+        "knee": 13,
+        "ankle": 15,
+        "big_toe": 17,
+        "small_toe": 18,
+        "heel": 19,
+    },
+    "right": {
+        "knee": 14,
+        "ankle": 16,
+        "big_toe": 20,
+        "small_toe": 21,
+        "heel": 22,
+    },
+}
+FOOT_GEOMETRY_PARTS = ("knee", "ankle", "big_toe", "small_toe", "heel")
 
 
 @dataclass(frozen=True)
@@ -187,7 +205,7 @@ def cache_key(
         ball_part = "noball"
     else:
         ball_part = f"{ball.x:.1f},{ball.y:.1f},{ball.score:.3f}"
-    return f"{video_name}|{frame_index}|{mode}|{kpt_thr:.3f}|{ball_part}"
+    return f"v{POSE_FEATURE_CACHE_VERSION}|{video_name}|{frame_index}|{mode}|{kpt_thr:.3f}|{ball_part}"
 
 
 def load_cache(path: Path) -> dict[str, dict[str, Any]]:
@@ -252,6 +270,288 @@ def shank_length(keypoints: np.ndarray, scores: np.ndarray, threshold: float) ->
     return float(np.median(lengths)) if lengths else None
 
 
+def side_shank_length(keypoints: np.ndarray, scores: np.ndarray, side: str, threshold: float) -> float | None:
+    mapping = FOOT_SIDE_KPTS[side]
+    knee = mapping["knee"]
+    ankle = mapping["ankle"]
+    if float(scores[knee]) < threshold or float(scores[ankle]) < threshold:
+        return None
+    x1, y1 = map(float, keypoints[knee])
+    x2, y2 = map(float, keypoints[ankle])
+    length = math.hypot(x2 - x1, y2 - y1)
+    return float(length) if length > 8.0 else None
+
+
+def keypoint_xy(keypoints: np.ndarray, scores: np.ndarray, index: int, threshold: float) -> tuple[float, float] | None:
+    conf = float(scores[index])
+    if not np.isfinite(conf) or conf < threshold:
+        return None
+    x, y = map(float, keypoints[index])
+    if not (np.isfinite(x) and np.isfinite(y)):
+        return None
+    return x, y
+
+
+def point_line_distance(point: tuple[float, float], start: tuple[float, float], end: tuple[float, float]) -> float | None:
+    px, py = point
+    x1, y1 = start
+    x2, y2 = end
+    dx = x2 - x1
+    dy = y2 - y1
+    denom = math.hypot(dx, dy)
+    if denom <= 1e-6:
+        return None
+    return abs((px - x1) * dy - (py - y1) * dx) / denom
+
+
+def axis_projection_features(
+    point: tuple[float, float],
+    start: tuple[float, float],
+    end: tuple[float, float],
+) -> dict[str, float | None]:
+    px, py = point
+    x1, y1 = start
+    x2, y2 = end
+    dx = x2 - x1
+    dy = y2 - y1
+    denom_sq = dx * dx + dy * dy
+    if denom_sq <= 1e-6:
+        return {"axis_len_px": None, "axis_projection": None, "axis_lateral_px": None}
+    axis_len = math.sqrt(denom_sq)
+    vx = px - x1
+    vy = py - y1
+    projection = (vx * dx + vy * dy) / denom_sq
+    lateral = abs(vx * dy - vy * dx) / axis_len
+    return {
+        "axis_len_px": float(axis_len),
+        "axis_projection": float(projection),
+        "axis_lateral_px": float(lateral),
+    }
+
+
+def crop_descriptor(frame: np.ndarray, points: list[tuple[float, float]], pad_px: int = 28) -> dict[str, Any]:
+    if frame is None or not points:
+        return {}
+    height, width = frame.shape[:2]
+    xs = [p[0] for p in points if np.isfinite(p[0])]
+    ys = [p[1] for p in points if np.isfinite(p[1])]
+    if not xs or not ys:
+        return {}
+    x1 = max(0, int(math.floor(min(xs) - pad_px)))
+    y1 = max(0, int(math.floor(min(ys) - pad_px)))
+    x2 = min(width, int(math.ceil(max(xs) + pad_px)))
+    y2 = min(height, int(math.ceil(max(ys) + pad_px)))
+    if x2 <= x1 or y2 <= y1:
+        return {}
+    crop = frame[y1:y2, x1:x2]
+    if crop.size == 0:
+        return {}
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 60, 140)
+    return {
+        "crop_ball_foot_width_px": float(x2 - x1),
+        "crop_ball_foot_height_px": float(y2 - y1),
+        "crop_ball_foot_area_px": float((x2 - x1) * (y2 - y1)),
+        "crop_ball_foot_hue_mean": float(np.mean(hsv[:, :, 0])),
+        "crop_ball_foot_hue_std": float(np.std(hsv[:, :, 0])),
+        "crop_ball_foot_sat_mean": float(np.mean(hsv[:, :, 1])),
+        "crop_ball_foot_sat_std": float(np.std(hsv[:, :, 1])),
+        "crop_ball_foot_val_mean": float(np.mean(hsv[:, :, 2])),
+        "crop_ball_foot_val_std": float(np.std(hsv[:, :, 2])),
+        "crop_ball_foot_gray_mean": float(np.mean(gray)),
+        "crop_ball_foot_gray_std": float(np.std(gray)),
+        "crop_ball_foot_edge_density": float(np.count_nonzero(edges) / edges.size),
+    }
+
+
+def foot_side_geometry(
+    keypoints: np.ndarray,
+    scores: np.ndarray,
+    *,
+    side: str,
+    ball: BallPoint,
+    threshold: float,
+    person_index: int,
+) -> dict[str, Any] | None:
+    mapping = FOOT_SIDE_KPTS[side]
+    ball_xy = (ball.x, ball.y)
+    shank = side_shank_length(keypoints, scores, side, threshold)
+    features: dict[str, Any] = {
+        "person_index": int(person_index),
+        "shank_length_px": shank,
+    }
+    min_part = None
+    min_dist = None
+    min_conf = None
+    visible_points: dict[str, tuple[float, float]] = {}
+    for part in FOOT_GEOMETRY_PARTS:
+        index = mapping[part]
+        conf = float(scores[index])
+        point = keypoint_xy(keypoints, scores, index, threshold)
+        dist = None
+        if point is not None:
+            visible_points[part] = point
+            dist = math.hypot(point[0] - ball.x, point[1] - ball.y)
+            if min_dist is None or dist < min_dist:
+                min_dist = dist
+                min_part = part
+                min_conf = conf
+        features[f"{part}_conf"] = conf if np.isfinite(conf) else None
+        features[f"{part}_dist_px"] = dist
+        features[f"{part}_dist_norm_shank"] = None if dist is None or not shank else dist / shank
+
+    if min_dist is None:
+        return None
+    features["foot_min_dist_px"] = min_dist
+    features["foot_min_dist_norm_shank"] = None if not shank else min_dist / shank
+    features["foot_min_part"] = min_part
+    features["foot_min_conf"] = min_conf
+
+    heel = visible_points.get("heel")
+    big_toe = visible_points.get("big_toe")
+    small_toe = visible_points.get("small_toe")
+    if heel is not None and big_toe is not None and small_toe is not None:
+        toe_mid = ((big_toe[0] + small_toe[0]) / 2.0, (big_toe[1] + small_toe[1]) / 2.0)
+        axis = axis_projection_features(ball_xy, heel, toe_mid)
+        inner_dist = point_line_distance(ball_xy, heel, big_toe)
+        outer_dist = point_line_distance(ball_xy, heel, small_toe)
+        margin = None if inner_dist is None or outer_dist is None else inner_dist - outer_dist
+        features.update(
+            {
+                "foot_axis_len_px": axis["axis_len_px"],
+                "ball_axis_projection": axis["axis_projection"],
+                "ball_axis_lateral_px": axis["axis_lateral_px"],
+                "inner_edge_dist_px": inner_dist,
+                "outer_edge_dist_px": outer_dist,
+                "inner_minus_outer_edge_dist_px": margin,
+                "edge_surface_guess": None if margin is None else ("inner" if margin < 0 else "outer"),
+                "edge_surface_margin_px": None if margin is None else abs(margin),
+            }
+        )
+    return features
+
+
+def default_geometry_features() -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "pose_geometry_present": False,
+        "pose_geometry_nearest_side": None,
+        "pose_geometry_nearest_surface": None,
+        "pose_geometry_side_margin_px": None,
+        "pose_geometry_surface_margin_px": None,
+        "pose_left_right_foot_min_dist_delta_px": None,
+    }
+    for side in ("left", "right"):
+        prefix = f"pose_{side}_"
+        out.update(
+            {
+                f"{prefix}foot_person_index": None,
+                f"{prefix}shank_length_px": None,
+                f"{prefix}foot_min_dist_px": None,
+                f"{prefix}foot_min_dist_norm_shank": None,
+                f"{prefix}foot_min_part": None,
+                f"{prefix}foot_min_conf": None,
+                f"{prefix}foot_axis_len_px": None,
+                f"{prefix}ball_axis_projection": None,
+                f"{prefix}ball_axis_lateral_px": None,
+                f"{prefix}inner_edge_dist_px": None,
+                f"{prefix}outer_edge_dist_px": None,
+                f"{prefix}inner_minus_outer_edge_dist_px": None,
+                f"{prefix}edge_surface_guess": None,
+                f"{prefix}edge_surface_margin_px": None,
+            }
+        )
+        for part in FOOT_GEOMETRY_PARTS:
+            out[f"{prefix}{part}_conf"] = None
+            out[f"{prefix}{part}_dist_px"] = None
+            out[f"{prefix}{part}_dist_norm_shank"] = None
+    for key in (
+        "crop_ball_foot_width_px",
+        "crop_ball_foot_height_px",
+        "crop_ball_foot_area_px",
+        "crop_ball_foot_hue_mean",
+        "crop_ball_foot_hue_std",
+        "crop_ball_foot_sat_mean",
+        "crop_ball_foot_sat_std",
+        "crop_ball_foot_val_mean",
+        "crop_ball_foot_val_std",
+        "crop_ball_foot_gray_mean",
+        "crop_ball_foot_gray_std",
+        "crop_ball_foot_edge_density",
+    ):
+        out[key] = None
+    return out
+
+
+def all_feet_geometry_features(
+    *,
+    keypoints: np.ndarray,
+    scores: np.ndarray,
+    ball: BallPoint | None,
+    threshold: float,
+    frame: np.ndarray | None = None,
+) -> dict[str, Any]:
+    out = default_geometry_features()
+    if ball is None or len(keypoints) == 0:
+        return out
+    best_by_side: dict[str, dict[str, Any] | None] = {"left": None, "right": None}
+    for person_index in range(len(keypoints)):
+        for side in ("left", "right"):
+            features = foot_side_geometry(
+                keypoints[person_index],
+                scores[person_index],
+                side=side,
+                ball=ball,
+                threshold=threshold,
+                person_index=person_index,
+            )
+            if features is None:
+                continue
+            prior = best_by_side[side]
+            if prior is None or float(features["foot_min_dist_px"]) < float(prior["foot_min_dist_px"]):
+                best_by_side[side] = features
+
+    for side, features in best_by_side.items():
+        if features is None:
+            continue
+        out["pose_geometry_present"] = True
+        prefix = f"pose_{side}_"
+        out[f"{prefix}foot_person_index"] = features.get("person_index")
+        out[f"{prefix}shank_length_px"] = features.get("shank_length_px")
+        for key, value in features.items():
+            if key in {"person_index", "shank_length_px"}:
+                continue
+            out[f"{prefix}{key}"] = value
+
+    left = best_by_side["left"]
+    right = best_by_side["right"]
+    if left is not None and right is not None:
+        delta = float(left["foot_min_dist_px"]) - float(right["foot_min_dist_px"])
+        out["pose_left_right_foot_min_dist_delta_px"] = delta
+        out["pose_geometry_nearest_side"] = "left" if delta <= 0 else "right"
+        out["pose_geometry_side_margin_px"] = abs(delta)
+    elif left is not None:
+        out["pose_geometry_nearest_side"] = "left"
+    elif right is not None:
+        out["pose_geometry_nearest_side"] = "right"
+
+    nearest_side = out.get("pose_geometry_nearest_side")
+    if nearest_side in {"left", "right"}:
+        out["pose_geometry_nearest_surface"] = out.get(f"pose_{nearest_side}_edge_surface_guess")
+        out["pose_geometry_surface_margin_px"] = out.get(f"pose_{nearest_side}_edge_surface_margin_px")
+        if frame is not None:
+            person_index = out.get(f"pose_{nearest_side}_foot_person_index")
+            if person_index is not None:
+                person_index = int(person_index)
+                crop_points = [(ball.x, ball.y)]
+                for part in FOOT_GEOMETRY_PARTS:
+                    point = keypoint_xy(keypoints[person_index], scores[person_index], FOOT_SIDE_KPTS[nearest_side][part], threshold)
+                    if point is not None:
+                        crop_points.append(point)
+                out.update(crop_descriptor(frame, crop_points))
+    return out
+
+
 def choose_person(keypoints: np.ndarray, scores: np.ndarray, ball: BallPoint | None, threshold: float) -> int | None:
     if len(keypoints) == 0:
         return None
@@ -272,7 +572,7 @@ def choose_person(keypoints: np.ndarray, scores: np.ndarray, ball: BallPoint | N
 
 
 def missing_pose_features(status: str, ball: BallPoint | None = None, frame_index: int | None = None) -> dict[str, Any]:
-    return {
+    out = {
         "pose_feature_status": status,
         "pose_frame_index": frame_index,
         "pose_ball_x": None if ball is None else round(ball.x, 3),
@@ -294,6 +594,8 @@ def missing_pose_features(status: str, ball: BallPoint | None = None, frame_inde
         "pose_nearest_lower_dist_px": None,
         "pose_nearest_lower_dist_norm_shank": None,
     }
+    out.update(default_geometry_features())
+    return out
 
 
 def compute_pose_features(
@@ -328,7 +630,7 @@ def compute_pose_features(
         nearest_lower = nearest_distance(kp, sc, ball, LOWER_KPTS, kpt_thr)
     foot_dist = None if not nearest_foot else nearest_foot.get("distance_px")
     lower_dist = None if not nearest_lower else nearest_lower.get("distance_px")
-    return {
+    out = {
         "pose_feature_status": "ok",
         "pose_frame_index": frame_index,
         "pose_ball_x": None if ball is None else round(ball.x, 3),
@@ -354,6 +656,8 @@ def compute_pose_features(
         if lower_dist is None or not shank
         else round(float(lower_dist) / shank, 6),
     }
+    out.update(all_feet_geometry_features(keypoints=keypoints, scores=scores, ball=ball, threshold=kpt_thr, frame=frame))
+    return out
 
 
 def attach_pose_to_rows(
@@ -529,6 +833,7 @@ def attach_dataset(args: argparse.Namespace) -> dict[str, Any]:
     status = "features_attached" if train_summary["pose_present_rows"] or test_summary["pose_present_rows"] else "no_pose_features"
     manifest = {
         "schema_version": 1,
+        "pose_feature_cache_version": POSE_FEATURE_CACHE_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "status": status,
         "runtime_status": runtime_status,

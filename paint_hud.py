@@ -726,7 +726,7 @@ def draw_effect_lines(frame: np.ndarray, center: tuple[int, int], age: float, ke
 
 def contact_badge_text(event: Event) -> str | None:
     raw = event.label.strip()
-    if not raw or raw in {"release_touch", "touch", "unknown", "generic"}:
+    if not raw or raw in {"release_touch", "reviewed_touch", "touch", "unknown", "generic"}:
         return None
     normalized = raw.replace("_", " ").replace("-", " ").strip().upper()
     aliases = {
@@ -736,6 +736,22 @@ def contact_badge_text(event: Event) -> str | None:
         "RIGHT FOOT": "R FOOT",
         "LEFT KICK": "L KICK",
         "RIGHT KICK": "R KICK",
+        "LEFT INNER KICK": "L IN KICK",
+        "RIGHT INNER KICK": "R IN KICK",
+        "LEFT OUTER KICK": "L OUT KICK",
+        "RIGHT OUTER KICK": "R OUT KICK",
+        "LEFT KNEE": "L KNEE",
+        "RIGHT KNEE": "R KNEE",
+        "LEFT INNER KNEE": "L IN KNEE",
+        "RIGHT INNER KNEE": "R IN KNEE",
+        "LEFT OUTER KNEE": "L OUT KNEE",
+        "RIGHT OUTER KNEE": "R OUT KNEE",
+        "LEFT STALL": "L STALL",
+        "RIGHT STALL": "R STALL",
+        "LEFT INNER STALL": "L IN STALL",
+        "RIGHT INNER STALL": "R IN STALL",
+        "LEFT OUTER STALL": "L OUT STALL",
+        "RIGHT OUTER STALL": "R OUT STALL",
         "KNEE": "KNEE",
         "STALL": "STALL",
     }

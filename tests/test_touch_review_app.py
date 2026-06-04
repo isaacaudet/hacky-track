@@ -78,6 +78,135 @@ class TouchReviewAppTests(unittest.TestCase):
             self.assertEqual(store.state()["summary"]["complete_videos"], 1)
             self.assertEqual(store.state()["summary"]["reviewed_hints"], 2)
 
+    def test_save_preserves_v1_contact_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = self.make_store(root)
+
+            draft = store.save_events(
+                "video-a",
+                [
+                    {
+                        "type": "touch",
+                        "time_sec": 1.2345,
+                        "review_status": "approved",
+                        "contact_side": "right",
+                        "contact_type": "kick",
+                        "contact_surface": "outer",
+                        "trick_label": "right_outer_kick",
+                        "contact_review_status": "reviewed",
+                        "contact_side_basis": "wearer_limb",
+                    }
+                ],
+                candidate_review_complete=False,
+                candidate_reviews=[],
+            )
+            event = draft["rallies"][0]["events"][0]
+
+            self.assertEqual(event["contact_side"], "right")
+            self.assertEqual(event["contact_type"], "kick")
+            self.assertEqual(event["contact_surface"], "outer")
+            self.assertEqual(event["trick_label"], "right_outer_kick")
+            self.assertEqual(event["contact_review_status"], "reviewed")
+            self.assertEqual(event["contact_side_basis"], "wearer_limb")
+
+    def test_save_preserves_generic_side_contact_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = self.make_store(root)
+
+            draft = store.save_events(
+                "video-a",
+                [
+                    {
+                        "type": "touch",
+                        "time_sec": 1.2345,
+                        "review_status": "approved",
+                        "contact_side": "left",
+                        "contact_type": "kick",
+                        "contact_surface": "unknown",
+                        "trick_label": "left_kick",
+                        "contact_review_status": "reviewed",
+                    }
+                ],
+                candidate_review_complete=False,
+                candidate_reviews=[],
+            )
+            event = draft["rallies"][0]["events"][0]
+
+            self.assertEqual(event["contact_side"], "left")
+            self.assertEqual(event["contact_type"], "kick")
+            self.assertEqual(event["contact_surface"], "unknown")
+            self.assertEqual(event["trick_label"], "left_kick")
+            self.assertEqual(event["contact_side_basis"], "wearer_limb")
+
+    def test_state_counts_wearer_and_legacy_side_basis_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = self.make_store(root)
+            store.save_events(
+                "video-a",
+                [
+                    {
+                        "type": "touch",
+                        "time_sec": 1.0,
+                        "review_status": "approved",
+                        "contact_side": "left",
+                        "contact_side_basis": "wearer_limb",
+                        "contact_type": "kick",
+                    },
+                    {
+                        "type": "touch",
+                        "time_sec": 2.0,
+                        "review_status": "approved",
+                        "contact_side": "right",
+                        "contact_type": "kick",
+                    },
+                    {
+                        "type": "touch",
+                        "time_sec": 3.0,
+                        "review_status": "approved",
+                        "contact_side": "left",
+                        "contact_side_basis": "screen_position",
+                        "contact_type": "kick",
+                    },
+                ],
+                candidate_review_complete=False,
+                candidate_reviews=[],
+            )
+
+            state = store.state()
+            item = state["items"][0]
+
+            self.assertEqual(item["wearer_side_events"], 1)
+            self.assertEqual(item["legacy_side_basis_events"], 1)
+            self.assertEqual(item["ambiguous_side_basis_events"], 1)
+            self.assertEqual(state["summary"]["wearer_side_events"], 1)
+            self.assertEqual(state["summary"]["legacy_side_basis_events"], 1)
+
+    def test_save_adds_contact_defaults_for_stall_and_drop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = self.make_store(root)
+
+            draft = store.save_events(
+                "video-a",
+                [
+                    {"type": "stall", "time_sec": 2.0, "review_status": "approved"},
+                    {"type": "drop_floor", "time_sec": 3.0, "review_status": "approved"},
+                ],
+                candidate_review_complete=False,
+                candidate_reviews=[],
+            )
+            events = draft["rallies"][0]["events"]
+
+            self.assertEqual(events[0]["contact_type"], "stall")
+            self.assertEqual(events[1]["contact_type"], "ground")
+            self.assertEqual(events[0]["contact_surface"], "unknown")
+            self.assertEqual(events[1]["contact_surface"], "unknown")
+            self.assertEqual(events[0]["contact_review_status"], "unreviewed")
+            self.assertEqual(events[1]["contact_review_status"], "unreviewed")
+
     def test_video_payload_exposes_contact_sheet_links(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -337,6 +466,53 @@ class TouchReviewAppTests(unittest.TestCase):
         self.assertIn('event.key === "l"', HTML)
         self.assertIn('id="replayHint"', HTML)
         self.assertIn('id="autoReplay"', HTML)
+
+    def test_review_ui_has_v1_contact_label_controls(self) -> None:
+        self.assertIn('id="selectedContactSide"', HTML)
+        self.assertIn('id="selectedContactType"', HTML)
+        self.assertIn('id="selectedContactSurface"', HTML)
+        self.assertIn('id="selectedTrickLabel"', HTML)
+        self.assertIn("function updateSelectedContactField(", HTML)
+        self.assertIn("v1.0 contact labels for selected event", HTML)
+
+    def test_review_ui_has_fast_contact_classification_workflow(self) -> None:
+        self.assertIn('id="classifyLeftKick"', HTML)
+        self.assertIn('id="classifyLeftOuterKick"', HTML)
+        self.assertIn('id="classifyLeftInnerKick"', HTML)
+        self.assertIn('id="classifyRightKick"', HTML)
+        self.assertIn('id="classifyRightInnerKick"', HTML)
+        self.assertIn('id="classifyRightOuterKick"', HTML)
+        self.assertIn('id="classifyLeftKnee"', HTML)
+        self.assertIn('id="classifyLeftOuterKnee"', HTML)
+        self.assertIn('id="classifyLeftInnerKnee"', HTML)
+        self.assertIn('id="classifyRightKnee"', HTML)
+        self.assertIn('id="classifyRightInnerKnee"', HTML)
+        self.assertIn('id="classifyRightOuterKnee"', HTML)
+        self.assertIn('id="classifyLeftStall"', HTML)
+        self.assertIn('id="classifyLeftInnerStall"', HTML)
+        self.assertIn('id="classifyLeftOuterStall"', HTML)
+        self.assertIn('id="classifyRightStall"', HTML)
+        self.assertIn('id="classifyRightInnerStall"', HTML)
+        self.assertIn('id="classifyRightOuterStall"', HTML)
+        self.assertIn('id="classifyGround"', HTML)
+        self.assertIn('id="classifyUnknown"', HTML)
+        self.assertIn('id="nextUnclassifiedEvent"', HTML)
+        self.assertIn('id="nextSideBasisReview"', HTML)
+        self.assertIn('id="selectedContactSideBasis"', HTML)
+        self.assertIn("Side means contacting limb / wearer side", HTML)
+        self.assertIn('contact_side_basis:"wearer_limb"', HTML)
+        self.assertIn("function classifySelectedEvent(", HTML)
+        self.assertIn("function stepUnclassifiedEvent()", HTML)
+        self.assertIn("function stepSideBasisReview()", HTML)
+        self.assertIn("function sideBasisQueue()", HTML)
+        self.assertIn("Load next side-basis clip", HTML)
+        self.assertIn("legacy side", HTML)
+        self.assertIn("Wearer-side basis labels", HTML)
+        self.assertIn("contact_review_status = \"reviewed\"", HTML)
+        self.assertIn('event.key === "1"', HTML)
+        self.assertIn('event.key === "8"', HTML)
+        self.assertIn('event.key === "g"', HTML)
+        self.assertIn('event.key === "m"', HTML)
         self.assertIn("autoReplay:true", HTML)
         self.assertIn("function cueCandidate(candidate, message)", HTML)
         self.assertIn("function playCandidateWindow(candidate, message)", HTML)

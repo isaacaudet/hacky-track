@@ -166,6 +166,7 @@ def rally_rows(doc: dict[str, Any]) -> list[dict[str, Any]]:
         touches = [event for event in events if event.get("type") == "touch"]
         stalls = [event for event in events if event.get("type") == "stall"]
         drops = [event for event in events if event.get("type") == "drop_floor"]
+        manual_contact_touches = [event for event in touches if event.get("manual_contact_label")]
         touch_times = [float(event["time_sec"]) for event in touches]
         start = float(rally.get("start_sec") or (touch_times[0] if touch_times else 0.0))
         end = float(rally.get("end_sec") or (touch_times[-1] if touch_times else start))
@@ -179,6 +180,10 @@ def rally_rows(doc: dict[str, Any]) -> list[dict[str, Any]]:
                 "end_sec": round(end, 6),
                 "duration_sec": round(duration, 6),
                 "touches": len(touches),
+                "manual_contact_labels": len(manual_contact_touches),
+                "manual_contact_side_labels": sum(1 for event in manual_contact_touches if event.get("contact_side") not in {None, "", "unknown"}),
+                "manual_contact_surface_labels": sum(1 for event in manual_contact_touches if event.get("contact_surface") not in {None, "", "unknown"}),
+                "manual_contact_type_labels": sum(1 for event in manual_contact_touches if event.get("contact_type") not in {None, "", "unknown"}),
                 "stalls": len(stalls),
                 "drops": len(drops),
                 "touch_rate_per_sec": None if duration <= 0 else round(len(touches) / duration, 6),
@@ -188,6 +193,18 @@ def rally_rows(doc: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
     return rows
+
+
+def contact_badge_summary(doc: dict[str, Any]) -> dict[str, Any]:
+    touches = [event for rally in doc.get("rallies", []) for event in rally.get("events", []) if event.get("type") == "touch"]
+    manual = [event for event in touches if event.get("manual_contact_label")]
+    return {
+        "manual_contact_labels": len(manual),
+        "manual_contact_side_labels": sum(1 for event in manual if event.get("contact_side") not in {None, "", "unknown"}),
+        "manual_contact_surface_labels": sum(1 for event in manual if event.get("contact_surface") not in {None, "", "unknown"}),
+        "manual_contact_type_labels": sum(1 for event in manual if event.get("contact_type") not in {None, "", "unknown"}),
+        "manual_contact_label_coverage": len(manual) / len(touches) if touches else None,
+    }
 
 
 def analyze_video(events_path: Path, labels_dir: Path, legacy_events_dir: Path, tol_sec: float) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -226,6 +243,7 @@ def analyze_video(events_path: Path, labels_dir: Path, legacy_events_dir: Path, 
             }
         )
     rallies = rally_rows(doc)
+    contact_badges = contact_badge_summary(doc)
     best_rally = max(rallies, key=lambda row: (int(row["touches"]), float(row["duration_sec"] or 0.0)), default=None)
     metrics = precision_recall(len(matches), len(false_positive_rows), len(false_negative_rows))
     summary = {
@@ -238,6 +256,7 @@ def analyze_video(events_path: Path, labels_dir: Path, legacy_events_dir: Path, 
         "truth_touches": len(truth_touches),
         "truth_stalls": sum(1 for event in label_events if event.type == "stall"),
         "truth_drop_floor": sum(1 for event in label_events if event.type == "drop_floor"),
+        **contact_badges,
         "rallies": len(rallies),
         "best_rally": best_rally,
         "rally_rows": rallies,
@@ -259,6 +278,10 @@ def aggregate_video_summaries(videos: list[dict[str, Any]]) -> dict[str, Any]:
         "truth_touches": sum(int(video.get("truth_touches") or 0) for video in videos),
         "truth_stalls": sum(int(video.get("truth_stalls") or 0) for video in videos),
         "truth_drop_floor": sum(int(video.get("truth_drop_floor") or 0) for video in videos),
+        "manual_contact_labels": sum(int(video.get("manual_contact_labels") or 0) for video in videos),
+        "manual_contact_side_labels": sum(int(video.get("manual_contact_side_labels") or 0) for video in videos),
+        "manual_contact_surface_labels": sum(int(video.get("manual_contact_surface_labels") or 0) for video in videos),
+        "manual_contact_type_labels": sum(int(video.get("manual_contact_type_labels") or 0) for video in videos),
         "touch_metrics": precision_recall(tp, fp, fn),
     }
 
@@ -291,11 +314,13 @@ def write_report(path: Path, manifest: dict[str, Any]) -> None:
             f"- Touch precision/recall/F1: `{fmt(m['precision'])}` / `{fmt(m['recall'])}` / `{fmt(m['f1'])}`",
             f"- FP/FN: `{m['false_positive']}` / `{m['false_negative']}`",
             f"- Reviewed stalls/drop_floor available: `{agg['truth_stalls']}` / `{agg['truth_drop_floor']}`",
+            f"- Manual reviewed contact badges: `{agg['manual_contact_labels']}` "
+            f"(side `{agg['manual_contact_side_labels']}`, surface `{agg['manual_contact_surface_labels']}`, type `{agg['manual_contact_type_labels']}`)",
             "",
             "## Per Video",
             "",
-            "| video | split/source | pred | truth | P | R | FP | FN | rallies | best rally |",
-            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+            "| video | split/source | pred | truth | P | R | FP | FN | manual badges | side/surface | rallies | best rally |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- |",
         ]
     )
     for video in manifest["videos"]:
@@ -304,7 +329,9 @@ def write_report(path: Path, manifest: dict[str, Any]) -> None:
         best_text = "-" if not best else f"R{best.get('rally_id')} {best.get('touches')} touches"
         lines.append(
             f"| `{video['video_id']}` | `{video.get('source_video')}` | {video['predicted_touches']} | {video['truth_touches']} | "
-            f"{fmt(m['precision'])} | {fmt(m['recall'])} | {m['false_positive']} | {m['false_negative']} | {video['rallies']} | {best_text} |"
+            f"{fmt(m['precision'])} | {fmt(m['recall'])} | {m['false_positive']} | {m['false_negative']} | "
+            f"{video.get('manual_contact_labels', 0)} | {video.get('manual_contact_side_labels', 0)}/{video.get('manual_contact_surface_labels', 0)} | "
+            f"{video['rallies']} | {best_text} |"
         )
     lines.extend(["", "## Error Times", ""])
     for video in manifest["videos"]:

@@ -40,7 +40,9 @@ DEFAULT_MAX_TRACK_GAP_SEC = 0.25
 DEFAULT_RALLY_GAP_SEC = 2.2
 DEFAULT_SCALE = 0.5
 LABEL_EVENT_TYPES = {"stall", "drop_floor"}
+TOUCH_EVENT_TYPES = {"touch", "release_touch"}
 DEFAULT_TOUCH_OVERRIDE_TOLERANCE_SEC = 0.08
+DEFAULT_CONTACT_LABEL_TOLERANCE_SEC = 0.2
 
 
 @dataclass(frozen=True)
@@ -241,6 +243,121 @@ def labeled_release_events(video: dict[str, Any], labels_dir: Path, legacy_event
             seen.add(key)
             events.append({**event, "label_source_path": str(path)})
     return sorted(events, key=lambda item: float(item["time_sec"]))
+
+
+def contact_label_text(event: dict[str, Any]) -> str:
+    trick_label = str(event.get("trick_label") or "").strip()
+    if trick_label and trick_label not in {"unknown", "touch", "release_touch"}:
+        return trick_label
+    contact_type = str(event.get("contact_type") or event.get("reviewed_contact_type") or "").strip()
+    contact_side = str(event.get("contact_side") or event.get("reviewed_contact_side") or "").strip()
+    contact_surface = str(event.get("contact_surface") or event.get("reviewed_contact_surface") or "").strip()
+    parts: list[str] = []
+    if contact_side and contact_side != "unknown":
+        parts.append(contact_side)
+    if contact_surface and contact_surface != "unknown":
+        parts.append(contact_surface)
+    if contact_type and contact_type not in {"unknown", "touch", "release_touch"}:
+        parts.append(contact_type)
+    return "_".join(parts) if parts else ""
+
+
+def labeled_touch_contact_events(video: dict[str, Any], labels_dir: Path, legacy_events_dir: Path) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for path in label_doc_candidates(video, labels_dir, legacy_events_dir):
+        if not path.exists():
+            continue
+        doc = read_json(path)
+        for event in flatten_labeled_events(doc):
+            event_type = str(event.get("type") or "")
+            if event_type not in TOUCH_EVENT_TYPES:
+                continue
+            if event.get("time_sec") is None:
+                continue
+            contact_label = contact_label_text(event)
+            if not contact_label:
+                continue
+            key = round(float(event["time_sec"]) * 50)
+            if key in seen:
+                continue
+            seen.add(key)
+            events.append(
+                {
+                    **event,
+                    "contact_label": contact_label,
+                    "contact_label_source": "reviewed_visual_label",
+                    "label_source_path": str(path),
+                }
+            )
+    return sorted(events, key=lambda item: float(item["time_sec"]))
+
+
+def apply_reviewed_touch_contact_labels(
+    touch_events: list[dict[str, Any]],
+    video: dict[str, Any],
+    labels_dir: Path,
+    legacy_events_dir: Path,
+    *,
+    tolerance_sec: float,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Attach reviewed contact labels to matched predicted touches for HUD display.
+
+    This is manual/reviewed metadata only. It does not add, remove, or retime any
+    classifier touch event and must not be interpreted as automatic contact
+    classification.
+    """
+
+    labels = labeled_touch_contact_events(video, labels_dir, legacy_events_dir)
+    used_label_indexes: set[int] = set()
+    enriched: list[dict[str, Any]] = []
+    counts = {
+        "reviewed_touch_labels_available": len(labels),
+        "reviewed_touch_labels_applied": 0,
+        "reviewed_contact_type_labels": 0,
+        "reviewed_contact_side_labels": 0,
+        "reviewed_contact_surface_labels": 0,
+    }
+    for event in touch_events:
+        time_sec = float(event.get("time_sec") or 0.0)
+        best_index: int | None = None
+        best_delta = tolerance_sec + 1.0
+        for index, label in enumerate(labels):
+            if index in used_label_indexes:
+                continue
+            delta = abs(float(label.get("time_sec") or 0.0) - time_sec)
+            if delta <= tolerance_sec and delta < best_delta:
+                best_index = index
+                best_delta = delta
+        if best_index is None:
+            enriched.append(event)
+            continue
+        used_label_indexes.add(best_index)
+        label = labels[best_index]
+        merged = {
+            **event,
+            "contact_label": label.get("contact_label"),
+            "contact_label_source": "reviewed_visual_label",
+            "contact_label_time_sec": round(float(label.get("time_sec") or 0.0), 6),
+            "contact_label_delta_sec": round(best_delta, 6),
+            "contact_label_source_path": label.get("label_source_path"),
+            "contact_type": label.get("contact_type"),
+            "contact_side": label.get("contact_side"),
+            "contact_side_basis": label.get("contact_side_basis"),
+            "contact_surface": label.get("contact_surface"),
+            "trick_label": label.get("trick_label"),
+            "manual_contact_label": True,
+        }
+        counts["reviewed_touch_labels_applied"] += 1
+        if merged.get("contact_type") not in {None, "", "unknown"}:
+            counts["reviewed_contact_type_labels"] += 1
+        if merged.get("contact_side") not in {None, "", "unknown"}:
+            counts["reviewed_contact_side_labels"] += 1
+        if merged.get("contact_surface") not in {None, "", "unknown"}:
+            counts["reviewed_contact_surface_labels"] += 1
+        enriched.append(merged)
+    counts["unmatched_reviewed_touch_labels"] = counts["reviewed_touch_labels_available"] - counts["reviewed_touch_labels_applied"]
+    return enriched, counts
 
 
 def selected_video_ids(
@@ -470,6 +587,14 @@ def build_hud_doc_and_anchors(
                         "touch_number": event_touch_number,
                         "time_sec": round(time_sec, 6),
                         "label": contact_label_for_touch(event),
+                        "contact_label_source": event.get("contact_label_source"),
+                        "contact_label_delta_sec": event.get("contact_label_delta_sec"),
+                        "contact_type": event.get("contact_type"),
+                        "contact_side": event.get("contact_side"),
+                        "contact_side_basis": event.get("contact_side_basis"),
+                        "contact_surface": event.get("contact_surface"),
+                        "trick_label": event.get("trick_label"),
+                        "manual_contact_label": bool(event.get("manual_contact_label")),
                         "confidence": round(float(event.get("confidence") or 0.0), 6),
                         "event_match_type": event.get("event_match_type"),
                         "audio_strength": event.get("audio_strength"),
@@ -528,6 +653,7 @@ def build_hud_doc_and_anchors(
         "events": flat_events,
         "notes": [
             "Touch times come from merged event-level classifier output.",
+            "Reviewed contact labels are attached to matched touch events for HUD display only; they are manual labels, not automatic contact classifier predictions.",
             "Stall and drop_floor events come from reviewed or legacy event labels when available; they are not inferred by the release touch classifier.",
             "Touch spark anchors are generated from fixed OWLv2 detections cleaned/interpolated by L2 trajectory logic.",
             "No HSV/color fallback anchors are used for release touch events.",
@@ -545,6 +671,10 @@ def build_hud_doc_and_anchors(
         "split": video["split"],
         "touch_events": len(events),
         "rendered_touch_events": len(flat_touch_events),
+        "manual_contact_badge_events": sum(1 for event in flat_touch_events if event.get("manual_contact_label")),
+        "manual_contact_side_badges": sum(1 for event in flat_touch_events if event.get("manual_contact_label") and event.get("contact_side") not in {None, "", "unknown"}),
+        "manual_contact_surface_badges": sum(1 for event in flat_touch_events if event.get("manual_contact_label") and event.get("contact_surface") not in {None, "", "unknown"}),
+        "manual_contact_type_badges": sum(1 for event in flat_touch_events if event.get("manual_contact_label") and event.get("contact_type") not in {None, "", "unknown"}),
         "rendered_stall_events": sum(1 for event in flat_events if event["type"] == "stall"),
         "rendered_drop_floor_events": sum(1 for event in flat_events if event["type"] == "drop_floor"),
         "rallies": len(rallies),
@@ -671,8 +801,8 @@ def write_report(path: Path, manifest: dict[str, Any]) -> None:
         "",
         "## Videos",
         "",
-        "| video | split | touches | stalls | drops | rallies | anchors | center sources | video/audio/nonblank | output |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |",
+        "| video | split | touches | reviewed badges | side badges | surface badges | stalls | drops | rallies | anchors | center sources | video/audio/nonblank | output |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |",
     ]
     for row in manifest["videos"]:
         verify = row.get("verification") or {}
@@ -680,7 +810,9 @@ def write_report(path: Path, manifest: dict[str, Any]) -> None:
         sources = ", ".join(f"{k}:{v}" for k, v in sorted((row.get("center_sources") or {}).items())) or "-"
         lines.append(
             f"| `{row['video_id']}` | {row['split']} | {row['rendered_touch_events']} | "
-            f"{row.get('rendered_stall_events', 0)} | {row.get('rendered_drop_floor_events', 0)} | {row['rallies']} | "
+            f"{row.get('manual_contact_badge_events', 0)} | {row.get('manual_contact_side_badges', 0)} | "
+            f"{row.get('manual_contact_surface_badges', 0)} | {row.get('rendered_stall_events', 0)} | "
+            f"{row.get('rendered_drop_floor_events', 0)} | {row['rallies']} | "
             f"{row['anchor_count']} | {sources} | {status} | `{row['output_video']}` |"
         )
     lines.extend(
@@ -690,6 +822,7 @@ def write_report(path: Path, manifest: dict[str, Any]) -> None:
             "",
             "- Event docs are generated from `touch_classifier_*_events.jsonl` merged event-level predictions.",
             "- False-negative diagnostic rows are excluded from HUD output.",
+            "- Reviewed contact labels are shown as manual HUD badges only when a merged touch matches a visual label; they are not automatic side/surface classifier predictions.",
             "- Reviewed `stall` and `drop_floor` labels are rendered when they exist, but they are not classifier predictions yet.",
             "- Touch anchors are generated from OWLv2 detections cleaned/interpolated by L2 where possible; raw OWLv2 nearest-point fallback is still detector-based, not HSV.",
             "- Any missing touch center fails the render unless `--allow-missing-centers` is passed.",
@@ -727,6 +860,13 @@ def render_release_huds(args: argparse.Namespace) -> dict[str, Any]:
             video_id,
             touch_overrides,
             tolerance_sec=args.touch_override_tolerance_sec,
+        )
+        touch_events, contact_label_summary = apply_reviewed_touch_contact_labels(
+            touch_events,
+            video,
+            args.visual_labels_dir,
+            args.legacy_events_dir,
+            tolerance_sec=args.contact_label_tolerance_sec,
         )
         label_events = labeled_release_events(video, args.visual_labels_dir, args.legacy_events_dir)
         events = touch_events + label_events
@@ -769,6 +909,7 @@ def render_release_huds(args: argparse.Namespace) -> dict[str, Any]:
                 "contact_sheet": str(video_out / "paint_hud_contact_sheet.jpg"),
                 "verification": verification,
                 "touch_override": override_summary,
+                "reviewed_contact_labels": contact_label_summary,
             }
         )
         write_json(video_out / "release_touch_hud_summary.json", summary)
@@ -797,6 +938,7 @@ def render_release_huds(args: argparse.Namespace) -> dict[str, Any]:
         "legacy_events_dir": str(args.legacy_events_dir),
         "touch_overrides": None if args.touch_overrides is None else str(args.touch_overrides),
         "touch_override_tolerance_sec": args.touch_override_tolerance_sec,
+        "contact_label_tolerance_sec": args.contact_label_tolerance_sec,
         "threshold": args.threshold,
         "scale": args.scale,
         "rally_gap_sec": args.rally_gap_sec,
@@ -819,6 +961,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--legacy-events-dir", type=Path, default=DEFAULT_LEGACY_EVENTS_DIR)
     parser.add_argument("--touch-overrides", type=Path, default=None)
     parser.add_argument("--touch-override-tolerance-sec", type=float, default=DEFAULT_TOUCH_OVERRIDE_TOLERANCE_SEC)
+    parser.add_argument("--contact-label-tolerance-sec", type=float, default=DEFAULT_CONTACT_LABEL_TOLERANCE_SEC)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     parser.add_argument("--assets", type=Path, default=DEFAULT_ASSETS)
     parser.add_argument("--video-id", action="append", default=[])

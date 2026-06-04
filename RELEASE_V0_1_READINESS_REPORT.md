@@ -148,15 +148,15 @@ Contact side/type is not release-ready.
 Current contact classifier status:
 
 ```text
-not_ready
+v1_0_candidate_only
 ```
 
 Blockers:
 
-- pose/body proximity columns are missing
-- 0 rows with reviewed contact labels
-- fewer than 3 videos with reviewed contact labels
-- fewer than 2 contact or side classes
+- pose/body proximity columns are now attachable and usable as soft features, but coverage is partial
+- reviewed contact labels are now available, but automatic side/surface/contact intelligence remains v1.0 scope
+- contact type currently passes only on a narrow kick/stall-heavy subset
+- wearer side and inner/outer surface remain below their v1.0 release gates
 
 Contact classifier artifact:
 
@@ -186,7 +186,7 @@ python3 -m unittest discover tests
 Result:
 
 ```text
-224/224 tests pass
+258/258 tests pass
 ```
 
 ## Release Decision
@@ -207,8 +207,8 @@ Full rally intelligence / contact-type / trick-classification release
 
 v1.0 work should focus on:
 
-1. Attach pose/body proximity features to candidate rows.
-2. Add reviewed contact side/type labels across at least 3 videos.
-3. Promote side/contact classification only after held-out gates pass.
+1. Improve automatic touch recall on the hard leave-clips-out clips without regressing frozen-test timing.
+2. Improve wearer-side and inner/outer surface classification from the current below-gate baselines.
+3. Add knee/drop/stall diversity before promoting full contact-type claims beyond kick/stall.
 4. Build automatic stall/drop prediction and evaluate separately.
-5. Render left/right/knee/stall/drop/trick HUD badges only after those gates are real.
+5. Render automatic left/right/knee/stall/drop/trick HUD badges only after those gates are real; reviewed manual badges can render separately today.

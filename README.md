@@ -121,12 +121,15 @@ touch overrides:
 
 ```bash
 python3 render_touch_release_hud.py \
-  --out-dir runs/release-27-public/touch_corpus_v1/release_touch_hud_v7_frozen_corrected \
+  --out-dir runs/release-27-public/touch_corpus_v1/release_touch_hud_v8_contact_badges_frozen_corrected \
   --touch-overrides release_overrides/touch_visual_overrides_v1.json
 ```
 
 The override file is a release rendering artifact, not classifier training data.
 Reports should show both model-only and visually corrected HUD results.
+When reviewed contact labels are available, this HUD path also shows them as
+manual badges on matched touches. Those badges are explicit reviewed-label
+facts, not automatic side/surface model predictions.
 
 Audit rally stats and exact missed/fake touch times from a rendered HUD set:
 
@@ -141,10 +144,27 @@ features to train:
 python3 train_release_contact_classifier.py
 ```
 
+Current v1.0 contact-intelligence status is intentionally split:
+
+| signal | status |
+| --- | --- |
+| touch timing | frozen-test merged event-level gate passes; leave-clips-out CV recall is below gate |
+| HUD touch sparks | release-candidate, OWLv2/L2 anchors, no HSV fallback |
+| reviewed contact badges | manual/label-backed HUD display only |
+| contact type | candidate, passes only on a narrow kick/stall-heavy subset |
+| left/right side | candidate, below release gate |
+| inner/outer surface | candidate, below release gate |
+
 The release-candidate report is:
 
 ```text
 TOUCH_RELEASE_CANDIDATE_REPORT.md
+```
+
+The v1.0 rally-intelligence readiness report is:
+
+```text
+RELEASE_V1_0_READINESS_REPORT.md
 ```
 
 The v0.1 release-readiness report is:
@@ -153,9 +173,10 @@ The v0.1 release-readiness report is:
 RELEASE_V0_1_READINESS_REPORT.md
 ```
 
-Current gate status: merged event-level touch precision/recall passes both
-leave-clips-out CV and frozen-test gates; release HUD verification passes video,
-audio, and nonblank-frame checks.
+Current gate status: model-only merged-event touch timing passes frozen test
+(P/R/F1 0.986/0.986/0.986) but fails leave-clips-out CV recall
+(P/R/F1 0.916/0.792/0.849). Visual-corrected frozen HUD verification passes
+video, audio, nonblank-frame, and badge-rendering checks.
 
 ## Main Scripts
 
@@ -754,13 +775,23 @@ What works:
 What is still in progress:
 
 - robust automatic footbag tracking across new users' clips
-- reliable side/contact-type/knee classification; the release contact classifier
-  currently needs reviewed contact labels and pose columns before it can train
+- broader automatic touch recall; frozen-test event-level timing passes, but
+  leave-clips-out CV still misses too many touches on the hard train/validation
+  clips
+- reliable side/contact-type/knee classification; pose/body-proximity and
+  visual-crop features are attachable now, and the release contact classifier
+  trains, but side and inner/outer surface accuracy are still below gate
 - automatic stall/drop detection; release HUD can render reviewed stall/drop
   labels, but the OWLv2 release path does not infer them yet
 - higher-recall trick detection
 - active learning for likely missed events
 - fresh-clone release testing on more machines
+
+Current v1.0 rally-intelligence status is tracked in:
+
+```text
+RELEASE_V1_0_READINESS_REPORT.md
+```
 
 ## Direction
 

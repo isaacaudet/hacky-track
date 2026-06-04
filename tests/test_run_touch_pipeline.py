@@ -6,6 +6,8 @@ from run_touch_pipeline import (
     release_gate_status,
     should_run_diagnostic_classifier,
     training_table_effective_status,
+    visual_crop_feature_summary_for_status,
+    vision_embedding_feature_summary_for_status,
 )
 
 
@@ -78,6 +80,40 @@ class RunTouchPipelineStatusTests(unittest.TestCase):
         )
 
         self.assertEqual(status, "partial_l2_features_attached")
+
+    def test_visual_crop_summary_reports_attachment_counts(self) -> None:
+        summary = visual_crop_feature_summary_for_status(
+            {
+                "status": "features_attached",
+                "train_val": {"rows": 4, "ok_rows": 3},
+                "test_frozen": {"rows": 2, "ok_rows": 1},
+            }
+        )
+
+        self.assertEqual(summary["status"], "features_attached")
+        self.assertEqual(summary["train_val_rows"], 4)
+        self.assertEqual(summary["train_val_ok_rows"], 3)
+        self.assertEqual(summary["test_frozen_rows"], 2)
+        self.assertEqual(summary["test_frozen_ok_rows"], 1)
+
+    def test_vision_embedding_summary_reports_requested_and_ok_counts(self) -> None:
+        summary = vision_embedding_feature_summary_for_status(
+            {
+                "status": "features_attached",
+                "model_name": "owlv2",
+                "contact_labeled_only": True,
+                "train_val": {"rows": 5, "requested_rows": 2, "ok_rows": 2},
+                "test_frozen": {"rows": 7, "requested_rows": 3, "ok_rows": 1},
+            }
+        )
+
+        self.assertEqual(summary["status"], "features_attached")
+        self.assertEqual(summary["model_name"], "owlv2")
+        self.assertTrue(summary["contact_labeled_only"])
+        self.assertEqual(summary["train_val_requested_rows"], 2)
+        self.assertEqual(summary["train_val_ok_rows"], 2)
+        self.assertEqual(summary["test_frozen_requested_rows"], 3)
+        self.assertEqual(summary["test_frozen_ok_rows"], 1)
 
     def test_runs_diagnostic_classifier_when_only_frozen_test_is_missing(self) -> None:
         self.assertTrue(

@@ -2,9 +2,15 @@
 
 ## Status
 
-`release_gate_passed`
+`trained_gate_failed_cv_recall`
 
 This release candidate promotes the touch pipeline to merged event-level output. Raw cue candidates are still tracked for diagnostics, but the product-facing touch output is the event-level merge/NMS result.
+
+Current status is intentionally split:
+
+- Model-only frozen-test merged events pass the touch gate.
+- Visual-corrected frozen-test HUDs are excellent and remain useful release preview artifacts.
+- Leave-clips-out CV merged events still fail recall, so the fully automatic touch model is not a broad v1.0 release claim yet.
 
 ## Reproduction Command
 
@@ -24,8 +30,8 @@ runs/release-27-public/touch_corpus_v1/touch_pipeline_status.md
 
 | split | gate level | precision | recall | f1 | fp | fn | result |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| leave-clips-out CV | merged event | 0.916 | 0.894 | 0.905 | 7 | 9 | PASS |
-| frozen test | merged event | 0.986 | 0.993 | 0.989 | 2 | 1 | PASS |
+| leave-clips-out CV | merged event | 0.916 | 0.792 | 0.849 | 7 | 20 | FAIL recall |
+| frozen test | merged event | 0.986 | 0.986 | 0.986 | 2 | 2 | PASS |
 
 Gate thresholds:
 
@@ -37,11 +43,15 @@ Gate thresholds:
 The top-level pipeline status reports:
 
 ```text
-Status: release_gate_passed
+Status: trained_gate_failed
 Release gate level: merged_event
-Leave-clips-out CV gate: True
+Leave-clips-out CV gate: False
 Frozen-test gate: True
 ```
+
+Main CV recall failures are concentrated in `video-340_singular_display-2` and
+`video-344_singular_display-2`; those clips are the next automatic-touch model
+blocker, not HUD rendering.
 
 ## HUD Status
 
@@ -159,16 +169,16 @@ evidence.
 | `video-68_singular_display` | 1.000 | 1.000 | `[]` | `[]` |
 | `video-296_singular_display-2` | 1.000 | 0.917 | `[]` | `[4.843]` |
 
-Full frozen-test visual-corrected HUD set:
+Full frozen-test visual-corrected HUD set with reviewed manual contact badges:
 
 ```bash
 python3 render_touch_release_hud.py \
-  --out-dir runs/release-27-public/touch_corpus_v1/release_touch_hud_v7_frozen_corrected \
+  --out-dir runs/release-27-public/touch_corpus_v1/release_touch_hud_v8_contact_badges_frozen_corrected \
   --touch-overrides release_overrides/touch_visual_overrides_v1.json
 
 python3 release_rally_analytics.py \
-  --hud-dir runs/release-27-public/touch_corpus_v1/release_touch_hud_v7_frozen_corrected \
-  --out-dir runs/release-27-public/touch_corpus_v1/release_touch_hud_v7_frozen_corrected/analytics_frozen_only \
+  --hud-dir runs/release-27-public/touch_corpus_v1/release_touch_hud_v8_contact_badges_frozen_corrected \
+  --out-dir runs/release-27-public/touch_corpus_v1/release_touch_hud_v8_contact_badges_frozen_corrected/analytics_frozen_only \
   --video-id video-439_singular_display \
   --video-id video-478_singular_display \
   --video-id video-482_singular_display \
@@ -179,19 +189,27 @@ python3 release_rally_analytics.py \
 
 Frozen-test corrected HUD status:
 
-| scope | videos | precision | recall | F1 | false positives | missed touches |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| frozen-test corrected HUD | 6 | 1.000 | 0.993 | 0.996 | 0 | 1 |
+| scope | videos | precision | recall | F1 | false positives | missed touches | manual badges | side/surface badges |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| frozen-test corrected HUD | 6 | 1.000 | 0.993 | 0.996 | 0 | 1 | 64 | 64/21 |
 
 The only remaining frozen-test corrected miss is
-`video-63_singular_display` at `10.652s`. The default v7 render also includes
+`video-63_singular_display` at `10.652s`. The default v8 render also includes
 one train sanity clip (`video-234_singular_display-2`); that clip is excluded
 from the frozen-only release metric above.
 
-Side/contact-type classification is still candidate-only. The separate contact
-gate reports `not_ready`: current training rows have zero pose proximity columns
-and zero reviewed left/right/contact labels, though reviewed event files do
-contain 6 stall labels.
+Side/surface/contact classification remains separate from touch timing. Current
+clip-disjoint contact metrics are:
+
+| target | rows | selected model | accuracy | gate |
+| --- | ---: | --- | ---: | --- |
+| contact type | 84 | gradient boosting, no OWLv2 embedding | 0.952 | pass on narrow kick/stall subset |
+| wearer side | 78 | ExtraTrees, no ball-centered visual crop | 0.744 | fail |
+| inner/outer surface | 25 | ExtraTrees, no ball-centered visual crop | 0.760 | fail |
+
+The HUD now shows reviewed contact labels as manual badges when a merged touch
+matches a visual label. These are explicitly label-backed display facts, not
+automatic side/surface classifier predictions.
 
 ## What Changed
 
@@ -203,7 +221,9 @@ contain 6 stall labels.
 - Final event-artifact vetoes suppress audited merged-event artifacts without removing any approved current-corpus touches.
 - Frozen-test rows remain held out from training and cross-validation.
 - Release HUD event docs can include reviewed stall/drop events with OWLv2/L2 anchors.
+- Release HUD event docs can attach reviewed contact labels to matched touch events as manual badges.
 - Rally analytics now reports best rally, touch rate, longest gap, and exact FP/FN times.
+- Rally analytics now reports manual contact badge coverage separately from automatic touch metrics.
 - Contact side/type has a separate readiness/evaluation path instead of being mixed into touch timing.
 
 Current output rules over existing features:
@@ -240,8 +260,8 @@ Current output rules over existing features:
 | Visual override file | `release_overrides/touch_visual_overrides_v1.json` |
 | Visual-corrected HUD report | `runs/release-27-public/touch_corpus_v1/release_touch_hud_v6_visual_corrected/release_touch_hud_report.md` |
 | Visual-corrected analytics | `runs/release-27-public/touch_corpus_v1/release_touch_hud_v6_visual_corrected/analytics/release_rally_analytics.md` |
-| Full frozen visual-corrected HUD report | `runs/release-27-public/touch_corpus_v1/release_touch_hud_v7_frozen_corrected/release_touch_hud_report.md` |
-| Full frozen visual-corrected analytics | `runs/release-27-public/touch_corpus_v1/release_touch_hud_v7_frozen_corrected/analytics_frozen_only/release_rally_analytics.md` |
+| Full frozen visual-corrected HUD report | `runs/release-27-public/touch_corpus_v1/release_touch_hud_v8_contact_badges_frozen_corrected/release_touch_hud_report.md` |
+| Full frozen visual-corrected analytics | `runs/release-27-public/touch_corpus_v1/release_touch_hud_v8_contact_badges_frozen_corrected/analytics_frozen_only/release_rally_analytics.md` |
 | Contact classifier status | `runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/release_contact_classifier_report.md` |
 
 ## Verification
@@ -278,14 +298,14 @@ python3 -m unittest \
   tests.test_release_event_error_audit
 ```
 
-Current result: `221` tests pass.
+Current result: `258` tests pass.
 
 ## Remaining Risks
 
-- This is a touch-detection release candidate, not a full trick/side/contact-type release.
+- This is a touch-detection release candidate, not a full automatic trick/side/contact-type release.
 - Long-video `video-68_singular_display` still has 2 visually audited fake touches and no misses at the 0.2s match tolerance.
 - Stall/drop badges are label-backed display events, not automatic release predictions yet.
-- Side/contact-type classification is not ready until pose features are attached and reviewed contact labels exist.
+- Reviewed contact badges are manual display facts; automatic side/surface badges remain blocked by failed contact gates.
 - Candidate-level CV still fails; the release pass depends on merged event-level output, which is the intended product output.
 - `video-344_singular_display-2` remains the weakest leave-one-video-out clip. Its remaining misses are mostly weak trajectory impulse, touch/stall overlap, or low classifier score.
 - Remaining leave-clips-out errors are concentrated in trajectory artifacts and track gaps, not OWLv2 detection thresholding.

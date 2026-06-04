@@ -49,9 +49,10 @@ v0.1 touch timing is release-ready:
 
 Current non-goal status:
 
-- Contact classifier is `not_ready`.
-- Pose/body proximity rows are missing from the release contact classifier input.
-- Reviewed left/right/contact labels are missing.
+- Contact classifier is trainable, but not v1.0-ready.
+- Pose/body proximity rows are attached and usable as soft features, but coverage is partial and CPU attachment is slow.
+- Reviewed contact labels now exist: 84 type rows, 78 side rows, and 25 surface rows.
+- Current clip-disjoint gates: type passes on a kick/stall-heavy subset, but side and inner/outer surface fail.
 - Stall/drop badges are label-backed display events only.
 
 ## v0.1 Blockers And Evidence
@@ -128,9 +129,10 @@ These are not v0.1 blockers unless the release is re-scoped to require full rall
 
 Needs:
 
-- Pose/body proximity features attached to candidates.
-- Reviewed labels for left/right/contact type.
-- Clip-disjoint evaluation.
+- Pose/body proximity features attached to candidates. DONE for current corpus, with partial coverage.
+- Visual crop descriptors attached to candidates. DONE for current corpus.
+- Reviewed labels for left/right/contact type. STARTED, but inner/outer/knee/drop/trick remain label-starved.
+- Clip-disjoint evaluation. DONE for contact type/side/surface; side and surface currently fail.
 
 Promotion gate:
 
@@ -172,6 +174,7 @@ Promotion gate:
 4. Run the release command on the frozen-test HUD set and one train sanity clip.
 5. Keep side/contact/stall/drop/tricks in the report as explicit not-ready gates, not silent omissions.
 6. After v0.1 is stable, attach pose features and label contact types for v1.0.
+   Pose and visual-crop attachment are now available; the current blocker is side/surface/stall/drop accuracy at gate counts.
 
 ## Definition Of Done For v0.1
 
