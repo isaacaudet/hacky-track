@@ -804,7 +804,19 @@ def tag_position(
 
 TRAIL_WINDOW_SEC = 0.45
 TRAIL_MAX_GAP_SEC = 0.12
+TRAIL_BRIDGE_MAX_SEC = 0.35  # display-only: dim dashed bridge across short track loss
 TRAIL_MIN_CONFIDENCE = 0.1  # calibrated no-target threshold (no_target_threshold_calibration_v1)
+
+
+def draw_dashed(effect: np.ndarray, p1: tuple[int, int], p2: tuple[int, int], color: tuple, thickness: int, dash_px: int = 9) -> None:
+    dist = math.hypot(p2[0] - p1[0], p2[1] - p1[1])
+    if dist < 1:
+        return
+    steps = max(1, int(dist / dash_px))
+    for i in range(0, steps, 2):
+        a = (int(p1[0] + (p2[0] - p1[0]) * i / steps), int(p1[1] + (p2[1] - p1[1]) * i / steps))
+        b = (int(p1[0] + (p2[0] - p1[0]) * (i + 1) / steps), int(p1[1] + (p2[1] - p1[1]) * (i + 1) / steps))
+        cv2.line(effect, a, b, color, thickness, cv2.LINE_AA)
 
 
 def recent_trail(trail: list[dict[str, float]], t: float, window: float) -> list[dict[str, float]]:
@@ -840,14 +852,19 @@ def draw_ball_trail(frame: np.ndarray, t: float, trail: list[dict[str, float]], 
         return
     effect = np.zeros((h, w, 4), dtype=np.uint8)
     for prev, cur in zip(recent[:-1], recent[1:]):
-        if cur["time_sec"] - prev["time_sec"] > TRAIL_MAX_GAP_SEC:
+        gap = cur["time_sec"] - prev["time_sec"]
+        if gap > TRAIL_BRIDGE_MAX_SEC:
             continue
         fade = max(0.0, 1.0 - (t - cur["time_sec"]) / TRAIL_WINDOW_SEC)
         p1 = (int(round(prev["x"] * w)), int(round(prev["y"] * h)))
         p2 = (int(round(cur["x"] * w)), int(round(cur["y"] * h)))
         thick = max(2, int(round((2 + 7 * fade) * scale_ui)))
-        cv2.line(effect, p1, p2, (0, 0, 0, int(120 * fade)), thick + 3, cv2.LINE_AA)
-        cv2.line(effect, p1, p2, (*CYAN[:3], int(210 * fade)), thick, cv2.LINE_AA)
+        if gap > TRAIL_MAX_GAP_SEC:
+            # Track loss: bridge it visibly as *inferred*, never as observed.
+            draw_dashed(effect, p1, p2, (*WHITE[:3], int(95 * fade)), max(1, thick - 2))
+        else:
+            cv2.line(effect, p1, p2, (0, 0, 0, int(120 * fade)), thick + 3, cv2.LINE_AA)
+            cv2.line(effect, p1, p2, (*CYAN[:3], int(210 * fade)), thick, cv2.LINE_AA)
     head = recent[-1]
     if t - head["time_sec"] <= TRAIL_MAX_GAP_SEC:
         model = fit_ballistic(recent, t)
