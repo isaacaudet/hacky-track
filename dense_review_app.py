@@ -176,55 +176,80 @@ class DenseReviewStore:
 
     def update_label(self, key: str, patch: dict[str, Any]) -> dict[str, Any]:
         with self.lock:
-            if key not in self.index_by_key:
-                raise KeyError(f"unknown row key: {key}")
-            row = dict(self.rows[self.index_by_key[key]])
-            base = self.original[key]
-
-            if any(field in patch for field in ("split", "training_use", "frame_image", "model_hints")):
-                raise ValueError("split, training_use, frame_image, and model_hints are locked")
-
-            clean: dict[str, Any] = {}
-            for field, value in patch.items():
-                if field not in MUTABLE_FIELDS:
-                    continue
-                clean[field] = value
-
-            visibility = clean.get("visibility", row.get("visibility", "unlabeled"))
-            quality = clean.get("quality", row.get("quality", "pending"))
-            if visibility not in LABEL_VISIBILITY:
-                raise ValueError(f"unsupported visibility: {visibility}")
-            if quality not in {"pending", "reviewed"}:
-                raise ValueError(f"unsupported quality: {quality}")
-
-            row.update(clean)
-            row["visibility"] = visibility
-            row["quality"] = quality
-            row["split"] = base.get("split")
-            row["training_use"] = base.get("training_use")
-
-            if row["visibility"] in NO_TARGET_STATES:
-                row["x"] = None
-                row["y"] = None
-                row["occlusion"] = row["visibility"]
-            elif row["visibility"] == "uncertain":
-                row["quality"] = "pending"
-            elif row["quality"] == "reviewed":
-                if row["visibility"] not in VISIBLE_STATES:
-                    raise ValueError("reviewed rows must be visible, partially_occluded, fully_occluded, or out_of_frame")
-                row["x"] = float(row["x"])
-                row["y"] = float(row["y"])
-                row["reviewed_at"] = now_iso()
-
-            if row.get("x") is not None:
-                row["x"] = round(float(row["x"]), 3)
-            if row.get("y") is not None:
-                row["y"] = round(float(row["y"]), 3)
-
-            row.setdefault("label_source", "human_dense_review")
-            self.rows[self.index_by_key[key]] = row
+            row = self._apply_patch_locked(key, patch)
             self.save()
             return row
+
+    def update_labels_bulk(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Apply many label patches atomically: validate/apply all, save once.
+
+        If any item fails, no change is persisted and in-memory rows are restored.
+        """
+        with self.lock:
+            backup = [dict(row) for row in self.rows]
+            applied: list[dict[str, Any]] = []
+            try:
+                for item in items:
+                    key = str(item.get("key", ""))
+                    patch = item.get("patch", {})
+                    if not isinstance(patch, dict):
+                        raise ValueError("each item patch must be an object")
+                    applied.append(self._apply_patch_locked(key, patch))
+            except Exception:
+                self.rows = backup
+                raise
+            self.save()
+            return applied
+
+    def _apply_patch_locked(self, key: str, patch: dict[str, Any]) -> dict[str, Any]:
+        if key not in self.index_by_key:
+            raise KeyError(f"unknown row key: {key}")
+        row = dict(self.rows[self.index_by_key[key]])
+        base = self.original[key]
+
+        if any(field in patch for field in ("split", "training_use", "frame_image", "model_hints")):
+            raise ValueError("split, training_use, frame_image, and model_hints are locked")
+
+        clean: dict[str, Any] = {}
+        for field, value in patch.items():
+            if field not in MUTABLE_FIELDS:
+                continue
+            clean[field] = value
+
+        visibility = clean.get("visibility", row.get("visibility", "unlabeled"))
+        quality = clean.get("quality", row.get("quality", "pending"))
+        if visibility not in LABEL_VISIBILITY:
+            raise ValueError(f"unsupported visibility: {visibility}")
+        if quality not in {"pending", "reviewed"}:
+            raise ValueError(f"unsupported quality: {quality}")
+
+        row.update(clean)
+        row["visibility"] = visibility
+        row["quality"] = quality
+        row["split"] = base.get("split")
+        row["training_use"] = base.get("training_use")
+
+        if row["visibility"] in NO_TARGET_STATES:
+            row["x"] = None
+            row["y"] = None
+            row["occlusion"] = row["visibility"]
+        elif row["visibility"] == "uncertain":
+            row["quality"] = "pending"
+        elif row["quality"] == "reviewed":
+            if row["visibility"] not in VISIBLE_STATES:
+                raise ValueError("reviewed rows must be visible, partially_occluded, fully_occluded, or out_of_frame")
+            row["x"] = float(row["x"])
+            row["y"] = float(row["y"])
+            row["reviewed_at"] = now_iso()
+
+        if row.get("x") is not None:
+            row["x"] = round(float(row["x"]), 3)
+        if row.get("y") is not None:
+            row["y"] = round(float(row["y"]), 3)
+
+        row.setdefault("label_source", "human_dense_review")
+        self.rows[self.index_by_key[key]] = row
+        return row
 
 
 class DenseReviewHandler(BaseHTTPRequestHandler):
@@ -295,6 +320,13 @@ class DenseReviewHandler(BaseHTTPRequestHandler):
                     raise ValueError("patch must be an object")
                 row = self.store.update_label(key, patch)
                 self.send_json({"row": row, "summary": self.store.summary()})
+                return
+            if parsed.path == "/api/label_bulk":
+                items = payload.get("items")
+                if not isinstance(items, list) or not items:
+                    raise ValueError("items must be a non-empty array of {key, patch}")
+                rows = self.store.update_labels_bulk(items)
+                self.send_json({"rows": rows, "summary": self.store.summary()})
                 return
             if parsed.path == "/api/cotracker":
                 self.send_json(self.run_cotracker(payload))
@@ -620,6 +652,7 @@ APP_HTML = r"""<!doctype html>
     .frame-tick.pending { background: #263247; }
     .frame-tick.current { outline: 2px solid #ffffff; outline-offset: 1px; }
     .frame-tick.audit { box-shadow: inset 0 -3px 0 var(--amber); }
+    .frame-tick.span { border-color: var(--magenta); box-shadow: inset 0 3px 0 var(--magenta); }
     .mini-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -715,6 +748,11 @@ APP_HTML = r"""<!doctype html>
           <button id="runCotrackerBtn" class="primary">Propagate from point</button>
           <button id="useSuggestionBtn">Use suggestion</button>
         </div>
+        <div class="row wrap">
+          <button id="acceptSpanBtn" class="good">Accept safe span (S)</button>
+          <button id="uncertainSpanBtn" class="warn">Low-vis span &rarr; uncertain</button>
+        </div>
+        <div id="spanMeta" class="meta"></div>
         <div id="cotrackerMeta" class="meta">Click the ball on a clear frame, then propagate. Suggestions are overlays only until you accept them.</div>
       </section>
 
@@ -727,7 +765,11 @@ APP_HTML = r"""<!doctype html>
         <p class="section-title">Controls</p>
         <div class="footer-help">
           Click image to place the ball. Keys: j/k next/prev, arrows step frames,
-          1-5 visibility, a approve current point, enter approve+next, p pending, n next pending.
+          1-5 visibility, a approve current point, enter approve+next,
+          s or shift+enter accept the whole safe CoTracker span, u mark low-vis span uncertain,
+          p pending, n next pending.
+          Workflow: seed a clear frame, Propagate, accept the safe span in one keystroke,
+          then re-seed after each occlusion/drift break.
           Test/audit rows can be reviewed for evaluation but remain audit_only and are excluded from training.
         </div>
       </section>
@@ -874,6 +916,23 @@ APP_HTML = r"""<!doctype html>
 
       const clipSuggestions = app.suggestions[row.clip_id] || {};
       const suggestion = clipSuggestions[row.frame_index];
+      // Short suggestion trail so drift is visible before accepting a span.
+      const rowsForClip = clipRows(row.clip_id);
+      const centerIdx = rowsForClip.findIndex((item) => item.frame_index === row.frame_index);
+      if (centerIdx >= 0) {
+        ctx.strokeStyle = "rgba(224,108,255,0.55)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        let started = false;
+        for (let i = Math.max(0, centerIdx - 12); i <= Math.min(rowsForClip.length - 1, centerIdx + 12); i += 1) {
+          const s = clipSuggestions[rowsForClip[i].frame_index];
+          if (!s || !Number.isFinite(s.x) || !Number.isFinite(s.y)) { started = false; continue; }
+          const [px, py] = toScreen(s.x, s.y);
+          if (started) ctx.lineTo(px, py); else ctx.moveTo(px, py);
+          started = true;
+        }
+        ctx.stroke();
+      }
       if (suggestion && Number.isFinite(suggestion.x) && Number.isFinite(suggestion.y)) {
         drawCircle(suggestion.x, suggestion.y, colors.cotracker, 9, `cot ${Number(suggestion.visibility_score || 0).toFixed(2)}`);
       }
@@ -936,6 +995,8 @@ APP_HTML = r"""<!doctype html>
     function renderFrameStrip(rowsForClip, row) {
       const strip = document.getElementById("frameStrip");
       strip.innerHTML = "";
+      const span = computeSpan(row, { safe: true });
+      const spanFrames = new Set(span.map((item) => item.frame_index));
       rowsForClip.forEach((item) => {
         const tick = document.createElement("button");
         tick.className = [
@@ -943,6 +1004,7 @@ APP_HTML = r"""<!doctype html>
           item.quality === "reviewed" ? "reviewed" : "pending",
           item.frame_index === row.frame_index ? "current" : "",
           item.training_use === "audit_only" ? "audit" : "",
+          spanFrames.has(item.frame_index) ? "span" : "",
         ].filter(Boolean).join(" ");
         tick.title = `frame ${item.frame_index} | ${item.quality} / ${item.visibility}`;
         tick.addEventListener("click", () => {
@@ -979,6 +1041,26 @@ APP_HTML = r"""<!doctype html>
       const clipSuggestions = app.suggestions[row.clip_id] || {};
       const suggestion = currentSuggestion(row);
       const button = document.getElementById("useSuggestionBtn");
+      const spanBtn = document.getElementById("acceptSpanBtn");
+      const lowVisBtn = document.getElementById("uncertainSpanBtn");
+      const spanMeta = document.getElementById("spanMeta");
+      const safeSpan = computeSpan(row, { safe: true });
+      const lowSpan = safeSpan.length ? [] : computeSpan(row, { safe: false });
+      const pendingInSafe = safeSpan.filter((item) => item.quality !== "reviewed").length;
+      const pendingInLow = lowSpan.filter((item) => item.quality !== "reviewed").length;
+      spanBtn.disabled = pendingInSafe === 0;
+      lowVisBtn.disabled = pendingInLow === 0;
+      if (safeSpan.length) {
+        spanMeta.textContent =
+          `Safe span: frames ${safeSpan[0].frame_index}-${safeSpan[safeSpan.length - 1].frame_index} ` +
+          `(${safeSpan.length} frames, ${pendingInSafe} pending). S / Shift+Enter accepts all as reviewed.`;
+      } else if (lowSpan.length) {
+        spanMeta.textContent =
+          `Low-visibility span: frames ${lowSpan[0].frame_index}-${lowSpan[lowSpan.length - 1].frame_index} ` +
+          `(${lowSpan.length} frames). U marks them uncertain (excluded from training) so you can re-click later.`;
+      } else {
+        spanMeta.textContent = "";
+      }
       if (!Object.keys(clipSuggestions).length) {
         button.textContent = "Use suggestion";
         button.className = "";
@@ -1174,11 +1256,18 @@ APP_HTML = r"""<!doctype html>
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "CoTracker failed");
-        const byFrame = {};
-        data.points.forEach((point) => { byFrame[point.frame_index] = point; });
+        const byFrame = app.suggestions[row.clip_id] || {};
+        data.points.forEach((point) => {
+          point.seed_frame = row.frame_index;
+          point.seed_dist = Math.abs(point.frame_index - row.frame_index);
+          const existing = byFrame[point.frame_index];
+          if (!existing || point.seed_dist < existing.seed_dist) {
+            byFrame[point.frame_index] = point;
+          }
+        });
         app.suggestions[row.clip_id] = byFrame;
         document.getElementById("cotrackerMeta").textContent =
-          `Loaded ${data.points.length} suggestions. Enter approves the current point; if no point is set, it uses a safe CoTracker suggestion.`;
+          `Loaded ${data.points.length} suggestions (merged by closest seed). Shift+Enter or S accepts the whole safe span; Enter approves frame-by-frame.`;
         render();
         drawOverlay();
       } catch (error) {
@@ -1217,6 +1306,135 @@ APP_HTML = r"""<!doctype html>
       return true;
     }
 
+    const MAX_SPAN_JUMP_PX = 90;
+
+    function computeSpan(row = current(), { safe = true } = {}) {
+      // Contiguous run of frames around the current frame whose CoTracker
+      // suggestions are all safe (visibility >= threshold, no teleport jumps)
+      // -- or all unsafe when safe=false. Already-reviewed frames are kept in
+      // the run but never overwritten.
+      const rowsForClip = clipRows(row.clip_id);
+      const clipSuggestions = app.suggestions[row.clip_id] || {};
+      const centerIdx = rowsForClip.findIndex((item) => item.frame_index === row.frame_index);
+      if (centerIdx < 0) return [];
+      const okFrame = (item) => {
+        const s = clipSuggestions[item.frame_index];
+        if (!s || !Number.isFinite(s.x) || !Number.isFinite(s.y)) return null;
+        return safe ? suggestionIsAutoSafe(s) : !suggestionIsAutoSafe(s);
+      };
+      if (!okFrame(rowsForClip[centerIdx])) return [];
+      const jumpOk = (a, b) => {
+        const sa = clipSuggestions[a.frame_index];
+        const sb = clipSuggestions[b.frame_index];
+        return Math.hypot(sa.x - sb.x, sa.y - sb.y) <= MAX_SPAN_JUMP_PX;
+      };
+      const span = [rowsForClip[centerIdx]];
+      for (let i = centerIdx - 1; i >= 0; i -= 1) {
+        if (!okFrame(rowsForClip[i]) || (safe && !jumpOk(rowsForClip[i], rowsForClip[i + 1]))) break;
+        span.unshift(rowsForClip[i]);
+      }
+      for (let i = centerIdx + 1; i < rowsForClip.length; i += 1) {
+        if (!okFrame(rowsForClip[i]) || (safe && !jumpOk(rowsForClip[i], rowsForClip[i - 1]))) break;
+        span.push(rowsForClip[i]);
+      }
+      return span;
+    }
+
+    async function savePatchBulk(items) {
+      if (!items.length) return false;
+      setSaveStatus("saving span...");
+      const response = await fetch("/api/label_bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        showError(data.error || "span save failed");
+        setSaveStatus("span save failed");
+        return false;
+      }
+      const byKey = {};
+      data.rows.forEach((updated) => { byKey[keyOf(updated)] = updated; });
+      app.rows = app.rows.map((item) => byKey[keyOf(item)] || item);
+      app.summary = data.summary;
+      setSaveStatus(`saved span of ${data.rows.length} @ ${new Date().toLocaleTimeString()}`);
+      render();
+      return true;
+    }
+
+    async function acceptSafeSpan() {
+      const row = current();
+      const span = computeSpan(row, { safe: true });
+      if (!span.length) {
+        showError("No safe CoTracker span at this frame. Propagate first, or visibility is too low here.");
+        return false;
+      }
+      const clipSuggestions = app.suggestions[row.clip_id] || {};
+      const items = span
+        .filter((item) => item.quality !== "reviewed")
+        .map((item) => {
+          const s = clipSuggestions[item.frame_index];
+          return {
+            key: `${item.clip_id}::${item.frame_index}`,
+            patch: {
+              x: s.x,
+              y: s.y,
+              visibility: "visible",
+              occlusion: "none",
+              quality: "reviewed",
+              label_source: "human_dense_review+cotracker_span",
+            },
+          };
+        });
+      if (!items.length) {
+        showError("Every frame in this safe span is already reviewed.");
+        return false;
+      }
+      const ok = await savePatchBulk(items);
+      if (ok) {
+        const last = span[span.length - 1];
+        const lastGlobal = app.rows.findIndex(
+          (item) => item.clip_id === last.clip_id && item.frame_index === last.frame_index,
+        );
+        if (lastGlobal >= 0) setIndex(Math.min(lastGlobal + 1, app.rows.length - 1));
+      }
+      return ok;
+    }
+
+    async function markLowVisSpanUncertain() {
+      const row = current();
+      const span = computeSpan(row, { safe: false });
+      if (!span.length) {
+        showError("No low-visibility CoTracker span at this frame.");
+        return false;
+      }
+      const items = span
+        .filter((item) => item.quality !== "reviewed")
+        .map((item) => ({
+          key: `${item.clip_id}::${item.frame_index}`,
+          patch: {
+            visibility: "uncertain",
+            occlusion: "unknown",
+            quality: "pending",
+            label_source: "human_dense_review+cotracker_lowvis",
+          },
+        }));
+      if (!items.length) {
+        showError("Every frame in this low-vis span is already reviewed.");
+        return false;
+      }
+      const ok = await savePatchBulk(items);
+      if (ok) {
+        const last = span[span.length - 1];
+        const lastGlobal = app.rows.findIndex(
+          (item) => item.clip_id === last.clip_id && item.frame_index === last.frame_index,
+        );
+        if (lastGlobal >= 0) setIndex(Math.min(lastGlobal + 1, app.rows.length - 1));
+      }
+      return ok;
+    }
+
     async function loadState() {
       const response = await fetch("/api/state");
       const data = await response.json();
@@ -1241,6 +1459,8 @@ APP_HTML = r"""<!doctype html>
     document.getElementById("clearBtn").addEventListener("click", clearPoint);
     document.getElementById("runCotrackerBtn").addEventListener("click", runCotracker);
     document.getElementById("useSuggestionBtn").addEventListener("click", () => useSuggestion({ review: true, advance: true }));
+    document.getElementById("acceptSpanBtn").addEventListener("click", acceptSafeSpan);
+    document.getElementById("uncertainSpanBtn").addEventListener("click", markLowVisSpanUncertain);
     document.querySelectorAll("button[data-vis]").forEach((button) => {
       button.addEventListener("click", () => setVisibility(button.dataset.vis));
     });
@@ -1255,6 +1475,9 @@ APP_HTML = r"""<!doctype html>
       if (event.key === "k" || event.key === "ArrowLeft") step(-1);
       if (event.key === "n") nextPending();
       if (event.key === "a") acceptReviewed();
+      if (event.key === "s") acceptSafeSpan();
+      if (event.key === "u") markLowVisSpanUncertain();
+      if (event.key === "Enter" && event.shiftKey) { acceptSafeSpan(); return; }
       if (event.key === "Enter") acceptAndNext();
       if (event.key === "p") markPending();
       if (event.key === "1") setVisibility("visible");
