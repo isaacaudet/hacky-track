@@ -689,6 +689,15 @@ def build_hud_doc_and_anchors(
         "source": "fixed_owlv2_l2_track_centers",
         "notes": "Coordinates are normalized x/y positions in the source frame and are used to place HUD touch sparks.",
         "anchors": anchors,
+        "trail": [
+            {
+                "time_sec": round(point.time_sec, 6),
+                "x": round(point.x / width, 6),
+                "y": round(point.y / height, 6),
+                "confidence": round(float(point.confidence), 6),
+            }
+            for point in clean_points
+        ],
     }
     summary = {
         "video_id": video["video_id"],
@@ -926,6 +935,7 @@ def render_release_huds(args: argparse.Namespace) -> dict[str, Any]:
             args.assets,
             scale=args.scale,
             max_seconds=args.max_seconds,
+            hud_style=args.hud_style,
         )
         verification = verify_render(output_video, require_audio=not args.allow_missing_audio)
         summary.update(
@@ -1000,6 +1010,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-track-gap-sec", type=float, default=DEFAULT_MAX_TRACK_GAP_SEC)
     parser.add_argument("--scale", type=float, default=DEFAULT_SCALE)
     parser.add_argument("--max-seconds", type=float, default=None)
+    parser.add_argument("--hud-style", choices=["classic", "clean"], default="clean",
+                        help="clean drops the live-counter/RALLY/TOTAL/BEST scoreboard; trail+cadence+badges stay")
     parser.add_argument("--allow-missing-centers", action="store_true")
     parser.add_argument("--allow-missing-audio", action="store_true")
     return parser
