@@ -1,0 +1,845 @@
+from __future__ import annotations
+
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+import train_release_contact_classifier as contact
+
+
+def write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+class ReleaseContactClassifierTests(unittest.TestCase):
+    def test_classification_quality_reports_balanced_accuracy(self) -> None:
+        labels = ["left", "left", "right", "right", "right", "right"]
+        preds = ["left", "right", "right", "right", "right", "left"]
+
+        quality = contact.classification_quality(labels, preds)
+
+        self.assertAlmostEqual(quality["accuracy"], 4 / 6)
+        self.assertAlmostEqual(quality["per_class_recall"]["left"], 0.5)
+        self.assertAlmostEqual(quality["per_class_recall"]["right"], 0.75)
+        self.assertAlmostEqual(quality["balanced_accuracy"], 0.625)
+
+    def test_pose_candidate_maps_lower_body_part_to_soft_type_and_side(self) -> None:
+        row = {
+            "pose_nearest_lower_part": "left_big_toe",
+            "pose_nearest_foot_part": "left_ankle",
+        }
+
+        out = contact.pose_candidate(row)
+
+        self.assertEqual(out["pose_candidate_type"], "kick")
+        self.assertEqual(out["pose_candidate_side"], "left")
+
+    def test_readiness_blocks_when_pose_and_contact_labels_are_missing(self) -> None:
+        rows = [{"video_id": "a", "candidate_time_sec": 1.0}]
+
+        summary = contact.readiness_summary(rows, [], min_examples=1, min_videos=1)
+
+        self.assertEqual(summary["status"], "not_ready")
+        self.assertTrue(any("pose" in reason for reason in summary["reasons"]))
+        self.assertTrue(any("contact labels" in reason for reason in summary["reasons"]))
+
+    def test_readiness_passes_when_pose_features_and_clip_disjoint_labels_exist(self) -> None:
+        rows = [
+            {
+                "video_id": "a",
+                "contact_type": "left_kick",
+                "contact_side": "left",
+                "pose_nearest_foot_dist_px": 12.0,
+                "pose_nearest_lower_part": "left_big_toe",
+            },
+            {
+                "video_id": "b",
+                "contact_type": "right_kick",
+                "contact_side": "right",
+                "pose_nearest_foot_dist_px": 14.0,
+                "pose_nearest_lower_part": "right_big_toe",
+            },
+        ]
+
+        summary = contact.readiness_summary(rows, [], min_examples=2, min_videos=2)
+
+        self.assertEqual(summary["status"], "ready_for_training")
+        self.assertEqual(summary["contact_side_counts_in_rows"], {"left": 1, "right": 1})
+        self.assertEqual(summary["contact_type_counts_in_rows"], {"kick": 2})
+
+    def test_readiness_distinguishes_attached_pose_columns_from_usable_distance(self) -> None:
+        rows = [
+            {
+                "video_id": "a",
+                "contact_type": "left_kick",
+                "contact_side": "left",
+                "pose_feature_status": "ok",
+                "pose_present": True,
+                "pose_nearest_foot_dist_px": None,
+            }
+        ]
+
+        summary = contact.readiness_summary(rows, [], min_examples=1, min_videos=1)
+
+        self.assertEqual(summary["rows_with_pose_columns"], 1)
+        self.assertEqual(summary["rows_with_pose_present"], 1)
+        self.assertEqual(summary["rows_with_pose_features"], 0)
+        self.assertTrue(any("no usable ball-to-body distance" in reason for reason in summary["reasons"]))
+        self.assertFalse(any("pose/body proximity columns are missing" in reason for reason in summary["reasons"]))
+
+    def test_readiness_counts_successful_visual_and_embedding_features(self) -> None:
+        rows = [
+            {
+                "video_id": "a",
+                "contact_type": "left_kick",
+                "contact_side": "left",
+                "pose_nearest_foot_dist_px": 12.0,
+                "visual_crop_feature_status": "ok",
+                "vision_embedding_present": True,
+            },
+            {
+                "video_id": "b",
+                "contact_type": "right_kick",
+                "contact_side": "right",
+                "pose_nearest_foot_dist_px": 14.0,
+                "visual_crop_feature_status": "missing_ball",
+                "vision_embedding_present": False,
+                "vision_embedding_000": 0.0,
+            },
+        ]
+
+        summary = contact.readiness_summary(rows, [], min_examples=2, min_videos=2)
+
+        self.assertEqual(summary["rows_with_visual_crop_features"], 1)
+        self.assertEqual(summary["rows_with_vision_embedding_features"], 1)
+
+    def test_matches_event_file_contact_labels_to_candidate_rows(self) -> None:
+        rows = [
+            {
+                "video_id": "video-a",
+                "video_name": "video-a.MOV",
+                "candidate_time_sec": 2.005,
+                "pose_nearest_foot_dist_px": 12.0,
+            },
+            {
+                "video_id": "video-a",
+                "video_name": "video-a.MOV",
+                "candidate_time_sec": 4.0,
+                "pose_nearest_foot_dist_px": 40.0,
+            },
+        ]
+        examples = [
+            {
+                "video_id": "video-a",
+                "source_video": "video-a.MOV",
+                "time_sec": 2.0,
+                "event_type": "stall",
+                "contact_type": "stall",
+                "contact_side": None,
+            }
+        ]
+
+        matched, match_summary = contact.attach_event_file_contact_labels(rows, examples, tolerance_sec=0.08)
+        labeled = contact.rows_with_contact_labels(matched)
+
+        self.assertEqual(match_summary["matched_examples"], 1)
+        self.assertEqual(labeled[0]["contact_type"], "stall")
+        self.assertEqual(labeled[0]["contact_label_source"], "visual_event_file")
+        self.assertAlmostEqual(labeled[0]["contact_label_match_delta_sec"], 0.005)
+
+    def test_loads_inner_outer_surface_labels_from_event_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_json(
+                root / "video-a.events.json",
+                {
+                    "source_video": "video-a.MOV",
+                    "rallies": [
+                        {
+                            "id": 1,
+                            "events": [
+                                {
+                                    "type": "touch",
+                                    "time_sec": 2.0,
+                                    "review_status": "approved",
+                                    "contact_side": "left",
+                                    "contact_type": "kick",
+                                    "contact_surface": "outer",
+                                    "trick_label": "left_outer_kick",
+                                },
+                                {
+                                    "type": "touch",
+                                    "time_sec": 3.0,
+                                    "review_status": "approved",
+                                    "contact_side": "right",
+                                    "trick_label": "right_inner_knee",
+                                },
+                            ],
+                        }
+                    ],
+                },
+            )
+
+            examples = contact.load_label_contact_examples(root)
+
+            self.assertEqual(examples[0]["contact_type"], "kick")
+            self.assertEqual(examples[0]["contact_side"], "left")
+            self.assertEqual(examples[0]["contact_surface"], "outer")
+            self.assertEqual(examples[1]["contact_type"], "knee")
+            self.assertEqual(examples[1]["contact_side"], "right")
+            self.assertEqual(examples[1]["contact_surface"], "inner")
+
+    def test_loads_generic_knee_and_surface_stall_labels_from_event_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_json(
+                root / "video-a.events.json",
+                {
+                    "source_video": "video-a.MOV",
+                    "rallies": [
+                        {
+                            "id": 1,
+                            "events": [
+                                {
+                                    "type": "touch",
+                                    "time_sec": 2.0,
+                                    "review_status": "approved",
+                                    "trick_label": "left_knee",
+                                },
+                                {
+                                    "type": "stall",
+                                    "time_sec": 3.0,
+                                    "review_status": "approved",
+                                    "trick_label": "right_outer_stall",
+                                },
+                            ],
+                        }
+                    ],
+                },
+            )
+
+            examples = contact.load_label_contact_examples(root)
+
+            self.assertEqual(examples[0]["contact_type"], "knee")
+            self.assertEqual(examples[0]["contact_side"], "left")
+            self.assertIsNone(examples[0]["contact_surface"])
+            self.assertEqual(examples[1]["contact_type"], "stall")
+            self.assertEqual(examples[1]["contact_side"], "right")
+            self.assertEqual(examples[1]["contact_surface"], "outer")
+
+    def test_ignores_non_wearer_side_labels_for_side_training(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_json(
+                root / "video-a.events.json",
+                {
+                    "source_video": "video-a.MOV",
+                    "rallies": [
+                        {
+                            "id": 1,
+                            "events": [
+                                {
+                                    "type": "touch",
+                                    "time_sec": 2.0,
+                                    "review_status": "approved",
+                                    "contact_side": "left",
+                                    "contact_side_basis": "screen_position",
+                                    "contact_type": "kick",
+                                },
+                                {
+                                    "type": "touch",
+                                    "time_sec": 3.0,
+                                    "review_status": "approved",
+                                    "contact_side": "right",
+                                    "contact_side_basis": "wearer_limb",
+                                    "contact_type": "kick",
+                                },
+                            ],
+                        }
+                    ],
+                },
+            )
+
+            examples = contact.load_label_contact_examples(root)
+
+            self.assertIsNone(examples[0]["contact_side"])
+            self.assertEqual(examples[0]["contact_side_basis"], "screen_position")
+            self.assertEqual(examples[1]["contact_side"], "right")
+            self.assertEqual(examples[1]["contact_side_basis"], "wearer_limb")
+
+    def test_side_specific_trick_label_implies_wearer_limb_basis(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_json(
+                root / "video-a.events.json",
+                {
+                    "source_video": "video-a.MOV",
+                    "rallies": [
+                        {
+                            "id": 1,
+                            "events": [
+                                {
+                                    "type": "touch",
+                                    "time_sec": 2.0,
+                                    "review_status": "approved",
+                                    "contact_side": "left",
+                                    "contact_type": "kick",
+                                    "trick_label": "left_outer_kick",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+
+            examples = contact.load_label_contact_examples(root)
+
+            self.assertEqual(examples[0]["contact_side"], "left")
+            self.assertEqual(examples[0]["contact_side_basis"], "wearer_limb")
+
+    def test_loads_stall_contact_examples_from_reviewed_event_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_json(
+                root / "video-a.events.json",
+                {
+                    "source_video": "video-a.MOV",
+                    "rallies": [
+                        {
+                            "id": 1,
+                            "events": [
+                                {"type": "stall", "time_sec": 2.0, "review_status": "approved"},
+                                {"type": "touch", "time_sec": 3.0, "review_status": "approved"},
+                            ],
+                        }
+                    ],
+                },
+            )
+
+            examples = contact.load_label_contact_examples(root)
+
+            self.assertEqual(len(examples), 1)
+            self.assertEqual(examples[0]["contact_type"], "stall")
+
+    def test_contact_label_file_inventory_separates_generic_and_surface_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_json(
+                root / "video-a.events.json",
+                {
+                    "source_video": "video-a.MOV",
+                    "rallies": [
+                        {
+                            "events": [
+                                {
+                                    "type": "touch",
+                                    "time_sec": 1.0,
+                                    "review_status": "approved",
+                                    "trick_label": "right_kick",
+                                    "contact_surface": "unknown",
+                                },
+                                {
+                                    "type": "touch",
+                                    "time_sec": 2.0,
+                                    "review_status": "approved",
+                                    "trick_label": "left_inner_kick",
+                                },
+                                {
+                                    "type": "touch",
+                                    "time_sec": 3.0,
+                                    "review_status": "rejected",
+                                    "trick_label": "right_outer_kick",
+                                },
+                            ],
+                        }
+                    ],
+                },
+            )
+
+            inventory = contact.contact_label_file_inventory(root)
+
+            aggregate = inventory["aggregate"]
+            self.assertEqual(aggregate["contact_type_labels"], 2)
+            self.assertEqual(aggregate["contact_side_labels"], 2)
+            self.assertEqual(aggregate["contact_surface_labels"], 1)
+            self.assertEqual(aggregate["explicit_unknown_surface_labels"], 1)
+            self.assertEqual(aggregate["surface_counts"], {"inner": 1})
+
+    def test_contact_label_gap_summary_reports_release_class_shortfalls(self) -> None:
+        rows = [
+            {"video_id": "a", "contact_type": "kick", "contact_side": "left", "contact_surface": "inner"},
+            {"video_id": "b", "contact_type": "stall", "contact_side": "right", "contact_surface": "outer"},
+            {"video_id": "c", "contact_type": "kick", "contact_side": "right"},
+        ]
+
+        gaps = contact.contact_label_gap_summary(rows)
+
+        self.assertEqual(gaps["contact_side"]["additional_needed"], {"left": 19, "right": 18})
+        self.assertEqual(gaps["contact_surface"]["additional_needed"], {"inner": 19, "outer": 19})
+        self.assertEqual(gaps["contact_type"]["additional_needed"]["knee"], 20)
+        self.assertEqual(gaps["contact_type"]["additional_needed"]["drop_floor"], 20)
+
+    def test_pose_coverage_by_contact_target_counts_pose_status_by_label(self) -> None:
+        rows = [
+            {
+                "video_id": "a",
+                "contact_side": "left",
+                "contact_type": "kick",
+                "pose_present": True,
+                "pose_feature_status": "ok",
+                "pose_nearest_foot_dist_px": 8.0,
+            },
+            {
+                "video_id": "b",
+                "contact_side": "right",
+                "contact_type": "kick",
+                "pose_present": False,
+                "pose_feature_status": "missing_person_box",
+                "pose_nearest_foot_dist_px": None,
+            },
+        ]
+
+        coverage = contact.pose_coverage_by_contact_target(rows)
+
+        self.assertEqual(coverage["contact_side"]["rows"], 2)
+        self.assertEqual(coverage["contact_side"]["pose_present_rows"], 1)
+        self.assertEqual(coverage["contact_side"]["usable_pose_distance_rows"], 1)
+        self.assertEqual(coverage["contact_side"]["by_label"]["right"]["pose_status_counts"], {"missing_person_box": 1})
+
+    def test_trains_clip_disjoint_contact_side_model_when_labels_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            rows = []
+            for video_id in ("video-a", "video-b", "video-c"):
+                rows.extend(
+                    [
+                        {
+                            "video_id": video_id,
+                            "candidate_time_sec": 1.0,
+                            "contact_side": "left",
+                            "pose_nearest_lower_part": "left_big_toe",
+                            "pose_nearest_foot_part": "left_big_toe",
+                            "pose_nearest_lower_dist_px": 8.0,
+                            "pose_nearest_foot_dist_px": 8.0,
+                            "pose_nearest_lower_conf": 0.9,
+                            "pose_nearest_foot_conf": 0.9,
+                            "trajectory_impulse_score": 10.0,
+                        },
+                        {
+                            "video_id": video_id,
+                            "candidate_time_sec": 2.0,
+                            "contact_side": "right",
+                            "pose_nearest_lower_part": "right_big_toe",
+                            "pose_nearest_foot_part": "right_big_toe",
+                            "pose_nearest_lower_dist_px": 8.0,
+                            "pose_nearest_foot_dist_px": 8.0,
+                            "pose_nearest_lower_conf": 0.9,
+                            "pose_nearest_foot_conf": 0.9,
+                            "trajectory_impulse_score": 10.0,
+                        },
+                    ]
+                )
+
+            result = contact.train_contact_models(
+                rows,
+                out_dir=out_dir,
+                min_examples=2,
+                min_videos=2,
+                targets=("contact_side",),
+            )
+
+            side = result["targets"]["contact_side"]
+            self.assertEqual(side["status"], "trained")
+            self.assertEqual(side["accuracy"], 1.0)
+            self.assertEqual(side["rows"], 6)
+            self.assertEqual(side["gate"], "fail")
+            self.assertEqual(side["side_basis_counts"], {"legacy_unspecified": 6})
+            self.assertIn("explicit wearer_limb side labels", side["gate_blockers"][0])
+            self.assertTrue((out_dir / "release_contact_classifier.joblib").exists())
+
+    def test_side_gate_passes_when_explicit_wearer_limb_labels_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            rows = []
+            for video_id in ("video-a", "video-b", "video-c"):
+                rows.extend(
+                    [
+                        {
+                            "video_id": video_id,
+                            "candidate_time_sec": 1.0,
+                            "contact_side": "left",
+                            "contact_side_basis": "wearer_limb",
+                            "pose_nearest_lower_part": "left_big_toe",
+                            "pose_nearest_foot_part": "left_big_toe",
+                            "trajectory_impulse_score": 10.0,
+                        },
+                        {
+                            "video_id": video_id,
+                            "candidate_time_sec": 2.0,
+                            "contact_side": "right",
+                            "contact_side_basis": "wearer_limb",
+                            "pose_nearest_lower_part": "right_big_toe",
+                            "pose_nearest_foot_part": "right_big_toe",
+                            "trajectory_impulse_score": 10.0,
+                        },
+                    ]
+                )
+
+            result = contact.train_contact_models(
+                rows,
+                out_dir=out_dir,
+                min_examples=2,
+                min_videos=2,
+                targets=("contact_side",),
+            )
+
+            side = result["targets"]["contact_side"]
+            self.assertEqual(side["status"], "trained")
+            self.assertEqual(side["gate"], "pass")
+            self.assertEqual(side["side_basis_counts"], {"wearer_limb": 6})
+            self.assertEqual(side["gate_blockers"], [])
+
+    def test_feature_dict_can_disable_visual_crop_features(self) -> None:
+        row = {
+            "pose_nearest_foot_dist_px": 12.0,
+            "visual_ball_x_norm": 0.3,
+            "visual_crop_grid_0_0_sat_mean": 0.8,
+            "visual_crop_feature_status": "ok",
+            "vision_embedding_000": 0.1,
+            "vision_embedding_feature_status": "ok",
+        }
+
+        features = contact.contact_feature_dict(row, disabled_prefixes=("visual_",))
+
+        self.assertIn("pose_nearest_foot_dist_px", features)
+        self.assertNotIn("visual_ball_x_norm", features)
+        self.assertNotIn("visual_crop_grid_0_0_sat_mean", features)
+        self.assertNotIn("visual_crop_feature_status", features)
+        self.assertIn("vision_embedding_000", features)
+        self.assertIn("vision_embedding_feature_status", features)
+
+    def test_feature_dict_can_disable_all_visual_features(self) -> None:
+        row = {
+            "pose_nearest_foot_dist_px": 12.0,
+            "visual_ball_x_norm": 0.3,
+            "vision_embedding_000": 0.1,
+            "vision_embedding_feature_status": "ok",
+        }
+
+        features = contact.contact_feature_dict(row, disabled_prefixes=("visual_", "vision_"))
+
+        self.assertIn("pose_nearest_foot_dist_px", features)
+        self.assertNotIn("visual_ball_x_norm", features)
+        self.assertNotIn("vision_embedding_000", features)
+        self.assertNotIn("vision_embedding_feature_status", features)
+
+    def test_feature_dict_can_select_pose_only_features(self) -> None:
+        row = {
+            "pose_nearest_foot_dist_px": 12.0,
+            "pose_geometry_nearest_side": "left",
+            "visual_ball_x_norm": 0.3,
+            "trajectory_impulse_score": 5.0,
+            "audio_strength": 2.0,
+        }
+
+        features = contact.contact_feature_dict(row, disabled_prefixes=contact.CONTACT_FEATURE_MODES["pose_only"])
+
+        self.assertIn("pose_nearest_foot_dist_px", features)
+        self.assertIn("pose_geometry_nearest_side", features)
+        self.assertNotIn("visual_ball_x_norm", features)
+        self.assertNotIn("trajectory_impulse_score", features)
+        self.assertNotIn("audio_strength", features)
+
+    def test_feature_dict_includes_automatic_foot_track_but_excludes_manual_calibration(self) -> None:
+        row = {
+            "foot_track_nearest_pose_side": "left",
+            "foot_track_nearest_pose_side_confidence": 0.8,
+            "manual_foot_calibrated_side": "right",
+            "manual_foot_calibrated_side_confidence": 1.0,
+        }
+
+        features = contact.contact_feature_dict(row)
+
+        self.assertEqual(features["foot_track_nearest_pose_side"], "left")
+        self.assertEqual(features["foot_track_nearest_pose_side_confidence"], 0.8)
+        self.assertNotIn("manual_foot_calibrated_side", features)
+        self.assertNotIn("manual_foot_calibrated_side_confidence", features)
+
+    def test_feature_dict_can_disable_visual_and_foot_track_features_together(self) -> None:
+        row = {
+            "pose_nearest_foot_dist_px": 12.0,
+            "visual_ball_x_norm": 0.3,
+            "vision_embedding_000": 0.1,
+            "foot_track_nearest_pose_side_confidence": 0.8,
+        }
+
+        features = contact.contact_feature_dict(row, disabled_prefixes=contact.CONTACT_FEATURE_MODES["no_visual_features_no_foot_track"])
+
+        self.assertIn("pose_nearest_foot_dist_px", features)
+        self.assertNotIn("visual_ball_x_norm", features)
+        self.assertNotIn("vision_embedding_000", features)
+        self.assertNotIn("foot_track_nearest_pose_side_confidence", features)
+
+    def test_feature_dict_can_disable_visual_crop_and_foot_track_while_keeping_embeddings(self) -> None:
+        row = {
+            "pose_nearest_foot_dist_px": 12.0,
+            "visual_ball_x_norm": 0.3,
+            "vision_embedding_000": 0.1,
+            "foot_track_nearest_pose_side_confidence": 0.8,
+        }
+
+        features = contact.contact_feature_dict(row, disabled_prefixes=contact.CONTACT_FEATURE_MODES["no_visual_crop_no_foot_track"])
+
+        self.assertIn("pose_nearest_foot_dist_px", features)
+        self.assertIn("vision_embedding_000", features)
+        self.assertNotIn("visual_ball_x_norm", features)
+        self.assertNotIn("foot_track_nearest_pose_side_confidence", features)
+
+    def test_feature_dict_includes_automatic_cotracker_and_can_disable_tracking_features(self) -> None:
+        row = {
+            "pose_nearest_foot_dist_px": 12.0,
+            "cotracker_nearest_track_side": "left",
+            "cotracker_side_confidence": 0.7,
+            "foot_track_nearest_pose_side_confidence": 0.8,
+        }
+
+        features = contact.contact_feature_dict(row)
+        disabled = contact.contact_feature_dict(row, disabled_prefixes=contact.CONTACT_FEATURE_MODES["no_tracking_features"])
+
+        self.assertEqual(features["cotracker_nearest_track_side"], "left")
+        self.assertEqual(features["cotracker_side_confidence"], 0.7)
+        self.assertNotIn("cotracker_nearest_track_side", disabled)
+        self.assertNotIn("cotracker_side_confidence", disabled)
+        self.assertNotIn("foot_track_nearest_pose_side_confidence", disabled)
+        self.assertIn("pose_nearest_foot_dist_px", disabled)
+
+    def test_feature_dict_includes_local_mask_and_can_disable_it(self) -> None:
+        row = {
+            "pose_nearest_foot_dist_px": 12.0,
+            "local_mask_feature_status": "ok",
+            "local_mask_component_angle_cos": -0.4,
+            "visual_ball_x_norm": 0.3,
+            "vision_embedding_000": 0.1,
+            "cotracker_side_confidence": 0.7,
+        }
+
+        features = contact.contact_feature_dict(row)
+        no_local = contact.contact_feature_dict(row, disabled_prefixes=contact.CONTACT_FEATURE_MODES["no_local_mask"])
+        local_only_visual = contact.contact_feature_dict(
+            row,
+            disabled_prefixes=contact.CONTACT_FEATURE_MODES["local_mask_no_visual_features_no_tracking_features"],
+        )
+        no_visual = contact.contact_feature_dict(row, disabled_prefixes=contact.CONTACT_FEATURE_MODES["no_visual_features_no_tracking_features"])
+
+        self.assertEqual(features["local_mask_feature_status"], "ok")
+        self.assertEqual(features["local_mask_component_angle_cos"], -0.4)
+        self.assertNotIn("local_mask_component_angle_cos", no_local)
+        self.assertIn("local_mask_component_angle_cos", local_only_visual)
+        self.assertNotIn("visual_ball_x_norm", local_only_visual)
+        self.assertNotIn("vision_embedding_000", local_only_visual)
+        self.assertNotIn("cotracker_side_confidence", local_only_visual)
+        self.assertNotIn("local_mask_component_angle_cos", no_visual)
+
+    def test_ridge_classifier_is_available_as_bounded_contact_model_family(self) -> None:
+        model = contact.build_model("ridge_classifier")
+
+        self.assertIn("ridge_classifier", contact.CONTACT_MODEL_FAMILIES)
+        self.assertIsNotNone(model)
+
+    def test_linear_svc_is_available_as_bounded_contact_model_family(self) -> None:
+        model = contact.build_model("linear_svc")
+
+        self.assertIn("linear_svc", contact.CONTACT_MODEL_FAMILIES)
+        self.assertIsNotNone(model)
+
+    def test_linear_svc_search_is_limited_to_bounded_feature_modes(self) -> None:
+        rows = []
+        for video_id in ("video-a", "video-b", "video-c"):
+            rows.extend(
+                [
+                    {
+                        "video_id": video_id,
+                        "candidate_time_sec": 1.0,
+                        "contact_side": "left",
+                        "contact_side_basis": "wearer_limb",
+                        "pose_nearest_lower_part": "left_big_toe",
+                        "pose_nearest_foot_dist_px": 8.0,
+                    },
+                    {
+                        "video_id": video_id,
+                        "candidate_time_sec": 2.0,
+                        "contact_side": "right",
+                        "contact_side_basis": "wearer_limb",
+                        "pose_nearest_lower_part": "right_big_toe",
+                        "pose_nearest_foot_dist_px": 8.0,
+                    },
+                ]
+            )
+
+        result, _model = contact.train_single_contact_target_best_mode(
+            rows,
+            "contact_side",
+            min_examples=2,
+            min_videos=2,
+        )
+
+        self.assertEqual(result["model_mode_results"]["all_features/linear_svc"]["status"], "not_ready")
+        self.assertIn("no_visual_features/linear_svc", result["model_mode_results"])
+        self.assertEqual(result["model_mode_results"]["no_visual_features/linear_svc"]["status"], "trained")
+
+    def test_side_sequence_priors_can_smooth_isolated_flip(self) -> None:
+        train_rows = [
+            {"video_id": "train-a", "candidate_time_sec": 1.0, "contact_side": "right"},
+            {"video_id": "train-a", "candidate_time_sec": 2.0, "contact_side": "right"},
+            {"video_id": "train-a", "candidate_time_sec": 3.0, "contact_side": "right"},
+            {"video_id": "train-b", "candidate_time_sec": 1.0, "contact_side": "left"},
+            {"video_id": "train-b", "candidate_time_sec": 2.0, "contact_side": "left"},
+            {"video_id": "train-b", "candidate_time_sec": 3.0, "contact_side": "left"},
+        ]
+
+        init, transitions = contact.sequence_transition_priors(
+            train_rows,
+            "contact_side",
+            states=contact.CONTACT_SIDE_SEQUENCE_STATES,
+            alpha=1.0,
+        )
+        smoothed = contact.viterbi_smooth_sequence(
+            ["right", "left", "right"],
+            [0.6, 0.6, 0.6],
+            init=init,
+            transitions=transitions,
+            states=contact.CONTACT_SIDE_SEQUENCE_STATES,
+            emission_temperature=1.0,
+            transition_weight=1.0,
+        )
+
+        self.assertEqual(smoothed, ["right", "right", "right"])
+
+    def test_contact_side_training_reports_sequence_smoothing_diagnostic_only(self) -> None:
+        rows = []
+        for video_id in ("video-a", "video-b", "video-c"):
+            rows.extend(
+                [
+                    {
+                        "video_id": video_id,
+                        "candidate_time_sec": 2.0,
+                        "contact_side": "right",
+                        "contact_side_basis": "wearer_limb",
+                        "pose_nearest_lower_part": "right_big_toe",
+                        "pose_nearest_foot_dist_px": 8.0,
+                    },
+                    {
+                        "video_id": video_id,
+                        "candidate_time_sec": 1.0,
+                        "contact_side": "left",
+                        "contact_side_basis": "wearer_limb",
+                        "pose_nearest_lower_part": "left_big_toe",
+                        "pose_nearest_foot_dist_px": 8.0,
+                    },
+                ]
+            )
+
+        result, _model = contact.train_single_contact_target(
+            rows,
+            "contact_side",
+            min_examples=2,
+            min_videos=2,
+            feature_mode="no_visual_features",
+            disabled_prefixes=contact.CONTACT_FEATURE_MODES["no_visual_features"],
+            model_family="logistic_regression",
+        )
+
+        self.assertEqual(result["status"], "trained")
+        self.assertEqual(result["sequence_smoothed"]["status"], "diagnostic_only")
+        self.assertEqual(result["sequence_smoothed"]["rows"], result["rows"])
+        self.assertIn("automatic HUD side badges", result["sequence_smoothed"]["note"])
+
+    def test_ridge_classifier_confidence_uses_decision_margin(self) -> None:
+        model = contact.build_model("ridge_classifier")
+        features = [{"x": -2.0}, {"x": -1.0}, {"x": 1.0}, {"x": 2.0}]
+        labels = ["left", "left", "right", "right"]
+        model.fit(features, labels)
+
+        confidences = contact.prediction_confidences(model, features)
+
+        self.assertEqual(len(confidences), len(features))
+        self.assertTrue(all(0.5 < confidence < 1.0 for confidence in confidences))
+        self.assertGreater(len({round(confidence, 4) for confidence in confidences}), 1)
+
+    def test_release_class_coverage_flags_missing_contact_type_classes(self) -> None:
+        coverage = contact.release_class_coverage(
+            {"kick": 25, "stall": 7},
+            "contact_type",
+            min_examples_per_class=20,
+        )
+
+        self.assertFalse(coverage["passes"])
+        self.assertEqual(
+            coverage["class_counts"],
+            {"kick": 25, "stall": 7, "knee": 0, "drop_floor": 0},
+        )
+        self.assertIn("`knee` labels", " ".join(coverage["blockers"]))
+        self.assertIn("`drop_floor` labels", " ".join(coverage["blockers"]))
+
+    def test_contact_type_accuracy_pass_can_still_fail_release_scope_on_class_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp)
+            rows = []
+            for video_id in ("video-a", "video-b", "video-c"):
+                rows.extend(
+                    [
+                        {
+                            "video_id": video_id,
+                            "candidate_time_sec": 1.0,
+                            "contact_type": "kick",
+                            "pose_nearest_lower_part": "left_big_toe",
+                            "pose_nearest_foot_dist_px": 8.0,
+                            "trajectory_impulse_score": 10.0,
+                        },
+                        {
+                            "video_id": video_id,
+                            "candidate_time_sec": 2.0,
+                            "contact_type": "stall",
+                            "pose_nearest_lower_part": "left_big_toe",
+                            "pose_nearest_foot_dist_px": 8.0,
+                            "trajectory_impulse_score": 1.0,
+                            "in_stall_window": True,
+                        },
+                    ]
+                )
+
+            result = contact.train_contact_models(
+                rows,
+                out_dir=out_dir,
+                min_examples=2,
+                min_videos=2,
+                targets=("contact_type",),
+            )
+
+            target = result["targets"]["contact_type"]
+            self.assertEqual(target["gate"], "pass")
+            self.assertEqual(target["release_scope_gate"], "fail")
+            blockers = " ".join(target["release_scope_blockers"])
+            self.assertIn("`knee` labels", blockers)
+            self.assertIn("`drop_floor` labels", blockers)
+
+    def test_selective_accuracy_reports_coverage_and_accuracy(self) -> None:
+        rows = [
+            {"correct": True, "confidence": 0.9},
+            {"correct": False, "confidence": 0.8},
+            {"correct": True, "confidence": 0.4},
+        ]
+
+        result = contact.selective_accuracy_rows(rows, thresholds=(0.5, 0.85))
+
+        self.assertEqual(result[0]["kept"], 2)
+        self.assertAlmostEqual(result[0]["coverage"], 2 / 3)
+        self.assertAlmostEqual(result[0]["accuracy"], 0.5)
+        self.assertEqual(result[1]["kept"], 1)
+        self.assertAlmostEqual(result[1]["accuracy"], 1.0)
+
+
+if __name__ == "__main__":
+    unittest.main()

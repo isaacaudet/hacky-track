@@ -476,6 +476,19 @@ def load_anchors(path: Path) -> dict[str, tuple[float, float]]:
     return anchors
 
 
+def load_trail(path: Path) -> list[dict[str, float]]:
+    """Normalized ball-track points ({time_sec, x, y, confidence}) from the anchors doc."""
+    if not path.exists():
+        return []
+    data = json.loads(path.read_text(encoding="utf-8"))
+    trail = []
+    for item in data.get("trail", []):
+        trail.append({"time_sec": float(item["time_sec"]), "x": float(item["x"]),
+                      "y": float(item["y"]), "confidence": float(item.get("confidence", 1.0))})
+    trail.sort(key=lambda p: p["time_sec"])
+    return trail
+
+
 def resize_rgba(src: np.ndarray, size: tuple[int, int]) -> np.ndarray:
     """Resize RGBA with premultiplied alpha so soft cutout edges stay clean."""
     if src.shape[1] == size[0] and src.shape[0] == size[1]:
@@ -629,9 +642,11 @@ def rally_state(t: float, rallies: list[Rally], events: list[Event]) -> dict[str
 def detect_bag_center(frame_bgr: np.ndarray) -> tuple[float, float] | None:
     h, w = frame_bgr.shape[:2]
     hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+    red_a = cv2.inRange(hsv, np.array([0, 55, 35]), np.array([18, 255, 255]))
+    red_b = cv2.inRange(hsv, np.array([165, 55, 35]), np.array([179, 255, 255]))
     green = cv2.inRange(hsv, np.array([28, 35, 35]), np.array([92, 255, 255]))
     yellow = cv2.inRange(hsv, np.array([12, 55, 45]), np.array([37, 255, 255]))
-    mask = green | yellow
+    mask = green | yellow | red_a | red_b
     gate = np.zeros_like(mask)
     gate[int(h * 0.38) :, :] = 255
     mask = cv2.bitwise_and(mask, gate)
@@ -722,6 +737,40 @@ def draw_effect_lines(frame: np.ndarray, center: tuple[int, int], age: float, ke
     overlay_rgba(frame, effect, 0, 0)
 
 
+def contact_badge_text(event: Event) -> str | None:
+    raw = event.label.strip()
+    if not raw or raw in {"release_touch", "reviewed_touch", "touch", "unknown", "generic"}:
+        return None
+    normalized = raw.replace("_", " ").replace("-", " ").strip().upper()
+    aliases = {
+        "LEFT": "L",
+        "RIGHT": "R",
+        "LEFT FOOT": "L FOOT",
+        "RIGHT FOOT": "R FOOT",
+        "LEFT KICK": "L KICK",
+        "RIGHT KICK": "R KICK",
+        "LEFT INNER KICK": "L IN KICK",
+        "RIGHT INNER KICK": "R IN KICK",
+        "LEFT OUTER KICK": "L OUT KICK",
+        "RIGHT OUTER KICK": "R OUT KICK",
+        "LEFT KNEE": "L KNEE",
+        "RIGHT KNEE": "R KNEE",
+        "LEFT INNER KNEE": "L IN KNEE",
+        "RIGHT INNER KNEE": "R IN KNEE",
+        "LEFT OUTER KNEE": "L OUT KNEE",
+        "RIGHT OUTER KNEE": "R OUT KNEE",
+        "LEFT STALL": "L STALL",
+        "RIGHT STALL": "R STALL",
+        "LEFT INNER STALL": "L IN STALL",
+        "RIGHT INNER STALL": "R IN STALL",
+        "LEFT OUTER STALL": "L OUT STALL",
+        "RIGHT OUTER STALL": "R OUT STALL",
+        "KNEE": "KNEE",
+        "STALL": "STALL",
+    }
+    return aliases.get(normalized, normalized[:12])
+
+
 def tag_position(
     center: tuple[int, int],
     tag_shape: tuple[int, int, int],
@@ -751,6 +800,174 @@ def tag_position(
             best_penalty = penalty
             best = (clamped_x, clamped_y)
     return int(best[0]), int(best[1])
+
+
+TRAIL_WINDOW_SEC = 0.45
+TRAIL_MAX_GAP_SEC = 0.12
+TRAIL_BRIDGE_MAX_SEC = 0.35  # display-only: dim dashed bridge across short track loss
+TRAIL_MIN_CONFIDENCE = 0.1  # calibrated no-target threshold (no_target_threshold_calibration_v1)
+
+
+def draw_dashed(effect: np.ndarray, p1: tuple[int, int], p2: tuple[int, int], color: tuple, thickness: int, dash_px: int = 9) -> None:
+    dist = math.hypot(p2[0] - p1[0], p2[1] - p1[1])
+    if dist < 1:
+        return
+    steps = max(1, int(dist / dash_px))
+    for i in range(0, steps, 2):
+        a = (int(p1[0] + (p2[0] - p1[0]) * i / steps), int(p1[1] + (p2[1] - p1[1]) * i / steps))
+        b = (int(p1[0] + (p2[0] - p1[0]) * (i + 1) / steps), int(p1[1] + (p2[1] - p1[1]) * (i + 1) / steps))
+        cv2.line(effect, a, b, color, thickness, cv2.LINE_AA)
+
+
+def recent_trail(trail: list[dict[str, float]], t: float, window: float) -> list[dict[str, float]]:
+    return [p for p in trail
+            if t - window <= p["time_sec"] <= t and p["confidence"] >= TRAIL_MIN_CONFIDENCE]
+
+
+def fit_ballistic(recent: list[dict[str, float]], t: float):
+    """Short-horizon motion model from the last ~0.3s of track: linear x,
+    quadratic y (gravity). Returns f(dt) -> (x, y) in normalized coords,
+    or None when the track is too thin to extrapolate honestly."""
+    pts = [p for p in recent if t - p["time_sec"] <= 0.30]
+    if len(pts) < 4:
+        return None
+    ts = np.array([p["time_sec"] - t for p in pts])
+    if ts.max() - ts.min() < 0.08:
+        return None
+    cx = np.polyfit(ts, np.array([p["x"] for p in pts]), 1)
+    cy = np.polyfit(ts, np.array([p["y"] for p in pts]), 2)
+    return lambda dt: (float(np.polyval(cx, dt)), float(np.polyval(cy, dt)))
+
+
+def draw_ball_trail(frame: np.ndarray, t: float, trail: list[dict[str, float]], scale_ui: float) -> None:
+    """Fading comet behind the ball from the cleaned detector track. Segments
+    break on time gaps so the trail never bridges occlusions or track loss.
+    The head is extrapolated to t so it sits ON the ball instead of lagging
+    a few detections behind, and a short ghost path predicts where it's going."""
+    if not trail:
+        return
+    h, w = frame.shape[:2]
+    recent = recent_trail(trail, t, TRAIL_WINDOW_SEC)
+    if len(recent) < 2:
+        return
+    effect = np.zeros((h, w, 4), dtype=np.uint8)
+    for prev, cur in zip(recent[:-1], recent[1:]):
+        gap = cur["time_sec"] - prev["time_sec"]
+        if gap > TRAIL_BRIDGE_MAX_SEC:
+            continue
+        fade = max(0.0, 1.0 - (t - cur["time_sec"]) / TRAIL_WINDOW_SEC)
+        p1 = (int(round(prev["x"] * w)), int(round(prev["y"] * h)))
+        p2 = (int(round(cur["x"] * w)), int(round(cur["y"] * h)))
+        thick = max(2, int(round((2 + 7 * fade) * scale_ui)))
+        if gap > TRAIL_MAX_GAP_SEC:
+            # Track loss: bridge it visibly as *inferred*, never as observed.
+            draw_dashed(effect, p1, p2, (*WHITE[:3], int(95 * fade)), max(1, thick - 2))
+        else:
+            cv2.line(effect, p1, p2, (0, 0, 0, int(120 * fade)), thick + 3, cv2.LINE_AA)
+            cv2.line(effect, p1, p2, (*CYAN[:3], int(210 * fade)), thick, cv2.LINE_AA)
+    head = recent[-1]
+    if t - head["time_sec"] <= TRAIL_MAX_GAP_SEC:
+        model = fit_ballistic(recent, t)
+        if model is not None:
+            hx, hy = model(0.0)  # lag compensation: position at *render* time
+        else:
+            hx, hy = head["x"], head["y"]
+        cx, cy = int(round(hx * w)), int(round(hy * h))
+        # Ghost prediction: where it's going over the next ~0.3s.
+        if model is not None:
+            for dt in (0.08, 0.16, 0.24, 0.32):
+                px, py = model(dt)
+                if not (0.0 <= px <= 1.0 and 0.0 <= py <= 1.05):
+                    break
+                alpha = int(170 * (1.0 - dt / 0.4))
+                radius = max(2, int(3.5 * scale_ui))
+                cv2.circle(effect, (int(px * w), int(py * h)), radius, (*WHITE[:3], alpha), -1, cv2.LINE_AA)
+        cv2.circle(effect, (cx, cy), max(3, int(7 * scale_ui)), (*YELLOW[:3], 235), -1, cv2.LINE_AA)
+        cv2.circle(effect, (cx, cy), max(4, int(10 * scale_ui)), (0, 0, 0, 160), 2, cv2.LINE_AA)
+    overlay_rgba(frame, effect, 0, 0)
+
+
+MINIMAP_PATH_SEC = 1.1
+
+
+def draw_minimap(frame: np.ndarray, t: float, trail: list[dict[str, float]], scale_ui: float) -> None:
+    """Spatial square: the ball's position in frame space with its recent path
+    and a velocity arrow showing where it's headed."""
+    if not trail:
+        return
+    h, w = frame.shape[:2]
+    s = lambda value: int(round(value * scale_ui))
+    size = s(118)
+    x0 = s(22)
+    y1 = h - s(74)
+    y0 = y1 - size
+    recent = recent_trail(trail, t, MINIMAP_PATH_SEC)
+    if not recent or t - recent[-1]["time_sec"] > 0.5:
+        return
+    effect = np.zeros((h, w, 4), dtype=np.uint8)
+    # Panel: dark glass + rough white frame.
+    cv2.rectangle(effect, (x0, y0), (x0 + size, y1), (10, 10, 10, 165), -1)
+    rng = stable_rng("minimap-frame")
+    corners = [(x0, y0), (x0 + size, y0), (x0 + size, y1), (x0, y1)]
+    for a, b in zip(corners, corners[1:] + corners[:1]):
+        ja = (a[0] + int(rng.integers(-2, 3)), a[1] + int(rng.integers(-2, 3)))
+        jb = (b[0] + int(rng.integers(-2, 3)), b[1] + int(rng.integers(-2, 3)))
+        cv2.line(effect, ja, jb, (0, 0, 0, 230), s(5), cv2.LINE_8)
+        cv2.line(effect, ja, jb, (245, 245, 245, 235), max(2, s(2)), cv2.LINE_8)
+    to_map = lambda p: (int(round(x0 + p[0] * size)), int(round(y0 + p[1] * size)))
+    # Recent path, fading.
+    for prev, cur in zip(recent[:-1], recent[1:]):
+        if cur["time_sec"] - prev["time_sec"] > TRAIL_MAX_GAP_SEC:
+            continue
+        fade = max(0.15, 1.0 - (t - cur["time_sec"]) / MINIMAP_PATH_SEC)
+        cv2.line(effect, to_map((prev["x"], prev["y"])), to_map((cur["x"], cur["y"])),
+                 (*CYAN[:3], int(200 * fade)), max(1, s(2)), cv2.LINE_AA)
+    # Ball + heading arrow from the ballistic model.
+    model = fit_ballistic(recent, t)
+    if model is not None:
+        bx, by = model(0.0)
+        fx, fy = model(0.25)
+        head_pt = to_map((min(1.0, max(0.0, bx)), min(1.0, max(0.0, by))))
+        fut_pt = to_map((min(1.0, max(0.0, fx)), min(1.0, max(0.0, fy))))
+        if head_pt != fut_pt:
+            cv2.arrowedLine(effect, head_pt, fut_pt, (0, 0, 0, 220), s(4), tipLength=0.4)
+            cv2.arrowedLine(effect, head_pt, fut_pt, (*GREEN[:3], 240), max(1, s(2)), tipLength=0.4)
+    else:
+        head_pt = to_map((recent[-1]["x"], recent[-1]["y"]))
+    cv2.circle(effect, head_pt, s(5), (*YELLOW[:3], 245), -1, cv2.LINE_AA)
+    cv2.circle(effect, head_pt, s(7), (0, 0, 0, 180), 2, cv2.LINE_AA)
+    overlay_rgba(frame, effect, 0, 0)
+
+
+CADENCE_MAX_INTERVAL_SEC = 2.0
+CADENCE_BARS = 6
+
+
+def draw_cadence(frame: np.ndarray, t: float, events: list[Event], assets: "AssetBank", scale_ui: float) -> None:
+    """Rhythm meter: the last few touch intervals as bars. Steady cadence reads
+    green, scrambling reads pink. Pure timing signal -- no classifier involved."""
+    s = lambda value: int(round(value * scale_ui))
+    touch_times = [e.time_sec for e in events if e.type == "touch" and e.time_sec <= t + 0.045]
+    intervals = [b - a for a, b in zip(touch_times[:-1], touch_times[1:]) if 0.0 < b - a <= CADENCE_MAX_INTERVAL_SEC]
+    recent = intervals[-CADENCE_BARS:]
+    if len(recent) < 2 or (touch_times and t - touch_times[-1] > 2.6):
+        return
+    mean = sum(recent) / len(recent)
+    cv_ratio = (sum((x - mean) ** 2 for x in recent) / len(recent)) ** 0.5 / mean if mean > 0 else 1.0
+    steady = cv_ratio < 0.22
+    color = GREEN if steady else PINK
+    h, w = frame.shape[:2]
+    base_x, base_y = w - s(150), h - s(78)
+    bar_w, gap, max_h = s(13), s(6), s(44)
+    effect = np.zeros((h, w, 4), dtype=np.uint8)
+    for idx, interval in enumerate(recent):
+        bar_h = max(s(5), min(max_h, int(round(max_h * interval / CADENCE_MAX_INTERVAL_SEC))))
+        x = base_x + idx * (bar_w + gap)
+        cv2.rectangle(effect, (x - 2, base_y - bar_h - 2), (x + bar_w + 2, base_y + 2), (0, 0, 0, 200), -1)
+        cv2.rectangle(effect, (x, base_y - bar_h), (x + bar_w, base_y), (*color[:3], 235), -1)
+    overlay_rgba(frame, effect, 0, 0)
+    label = assets.bare_text(f"{60.0 / mean:.0f} bpm" if steady else "find the beat", color, s(17))
+    overlay_rgba(frame, label, base_x, base_y - max_h - s(26), 1.0)
 
 
 def draw_timeline(frame: np.ndarray, t: float, events: list[Event], duration: float, scale_ui: float) -> None:
@@ -792,41 +1009,54 @@ def draw_hud(
     assets: AssetBank,
     anchors: dict[str, tuple[float, float]],
     auto_centers: dict[str, tuple[float, float]],
+    trail: list[dict[str, float]] | None = None,
+    hud_style: str = "classic",
 ) -> None:
     h, w = frame.shape[:2]
     scale_ui = w / 688.0
     s = lambda value: int(round(value * scale_ui))
     state = rally_state(t, rallies, events)
 
-    overlay_rgba(frame, assets.rgba("panels/panel_live_counter.png"), s(14), s(16), scale_ui)
-    overlay_rgba(frame, assets.rgba("labels/label_live_count.png"), s(32), s(28), scale_ui * 0.78)
-    expected = max(1, int(state["expected"] or state["current_touches"] or 1))
-    count_text = f"{int(state['current_touches'])}/{expected}"
-    overlay_rgba(frame, assets.digit_string(count_text, s(68)), s(30), s(66), 1.0)
+    draw_ball_trail(frame, t, trail or [], scale_ui)
+    draw_minimap(frame, t, trail or [], scale_ui)
 
-    pip_y = s(138)
-    pip_x = s(36)
-    pip_gap = s(18)
-    for idx in range(min(expected, 10)):
-        rel = "pips/pip_on.png" if idx < int(state["current_touches"]) else "pips/pip_off.png"
-        overlay_rgba(frame, assets.rgba(rel), pip_x + idx * pip_gap, pip_y, scale_ui * 0.68)
+    if hud_style == "clean":
+        # Compact rally tracker: current rally + its live touch count, nothing else.
+        chip = assets.chip(f"RALLY {state['rally_id'] or 1} · {int(state['current_touches'])}", YELLOW, BLACK, s(22))
+        overlay_rgba(frame, chip, s(18), s(18), 1.0)
+        best_chip = assets.chip(f"BEST {state['best']}", PINK, BLACK, s(16))
+        overlay_rgba(frame, best_chip, s(18), s(18) + chip.shape[0] + s(6), 1.0)
 
-    overlay_rgba(frame, assets.bare_text("rally live", GREEN, s(20)), s(38), s(150), 1.0)
+    if hud_style == "classic":
+        overlay_rgba(frame, assets.rgba("panels/panel_live_counter.png"), s(14), s(16), scale_ui)
+        overlay_rgba(frame, assets.rgba("labels/label_live_count.png"), s(32), s(28), scale_ui * 0.78)
+        expected = max(1, int(state["expected"] or state["current_touches"] or 1))
+        count_text = f"{int(state['current_touches'])}/{expected}"
+        overlay_rgba(frame, assets.digit_string(count_text, s(68)), s(30), s(66), 1.0)
 
-    chip_y = s(20)
-    chips = [
-        (f"RALLY {state['rally_id'] or 1}/{state['rally_total']}", YELLOW),
-        (f"TOTAL {state['total_touches']}", CYAN),
-        (f"BEST {state['best']}", PINK),
-    ]
-    chip_x = s(288)
-    for text, color in chips:
-        chip = assets.chip(text, color, BLACK, s(20))
-        if chip_x + chip.shape[1] > w - s(8):
-            chip_x = s(288)
-            chip_y += s(42)
-        overlay_rgba(frame, chip, chip_x, chip_y, 1.0)
-        chip_x += int(chip.shape[1] + s(7))
+        pip_y = s(138)
+        pip_x = s(36)
+        pip_gap = s(18)
+        for idx in range(min(expected, 10)):
+            rel = "pips/pip_on.png" if idx < int(state["current_touches"]) else "pips/pip_off.png"
+            overlay_rgba(frame, assets.rgba(rel), pip_x + idx * pip_gap, pip_y, scale_ui * 0.68)
+
+        overlay_rgba(frame, assets.bare_text("rally live", GREEN, s(20)), s(38), s(150), 1.0)
+
+        chip_y = s(20)
+        chips = [
+            (f"RALLY {state['rally_id'] or 1}/{state['rally_total']}", YELLOW),
+            (f"TOTAL {state['total_touches']}", CYAN),
+            (f"BEST {state['best']}", PINK),
+        ]
+        chip_x = s(288)
+        for text, color in chips:
+            chip = assets.chip(text, color, BLACK, s(20))
+            if chip_x + chip.shape[1] > w - s(8):
+                chip_x = s(288)
+                chip_y += s(42)
+            overlay_rgba(frame, chip, chip_x, chip_y, 1.0)
+            chip_x += int(chip.shape[1] + s(7))
 
     if state["stall"] is not None:
         overlay_rgba(frame, assets.rgba("badges/badge_stall.png"), w - s(162), s(86), scale_ui * 0.72)
@@ -840,6 +1070,10 @@ def draw_hud(
                 tag = assets.chip("+1", YELLOW, BLACK, s(32))
                 tag_x, tag_y = tag_position(center, tag.shape, frame.shape, scale_ui)
                 overlay_rgba(frame, tag, tag_x, tag_y, 1.0)
+                badge_text = contact_badge_text(event)
+                if badge_text:
+                    badge = assets.chip(badge_text, CYAN, BLACK, s(18))
+                    overlay_rgba(frame, badge, tag_x, tag_y + tag.shape[0] + s(5), 1.0)
         elif event.type == "stall":
             center = event_center(event, frame.shape, anchors, auto_centers)
             draw_effect_lines(frame, center, age, event_key(event), stall=True)
@@ -847,6 +1081,7 @@ def draw_hud(
         elif event.type == "drop_floor" and age <= 0.55:
             overlay_rgba(frame, assets.rgba("badges/badge_floor_reset.png"), w // 2 - s(116), h - s(138), scale_ui * 0.66)
 
+    draw_cadence(frame, t, events, assets, scale_ui)
     draw_timeline(frame, t, events, duration, scale_ui)
 
 
@@ -889,9 +1124,11 @@ def render_video(
     *,
     scale: float,
     max_seconds: float | None = None,
+    hud_style: str = "classic",
 ) -> Path:
     rallies, events, _ = load_event_doc(events_path)
     anchors = load_anchors(anchors_path)
+    trail = load_trail(anchors_path)
     auto_centers = auto_anchor_centers(video, events, anchors, scale)
     assets = AssetBank(asset_dir)
 
@@ -927,7 +1164,7 @@ def render_video(
             if (frame.shape[1], frame.shape[0]) != (out_w, out_h):
                 frame = cv2.resize(frame, (out_w, out_h), interpolation=cv2.INTER_AREA)
             t = frame_index / fps
-            draw_hud(frame, t, rallies, events, duration, assets, anchors, auto_centers)
+            draw_hud(frame, t, rallies, events, duration, assets, anchors, auto_centers, trail=trail, hud_style=hud_style)
             writer.write(frame)
             frame_index += 1
         writer.release()

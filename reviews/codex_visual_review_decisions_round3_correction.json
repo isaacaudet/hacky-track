@@ -1,0 +1,15 @@
+{
+  "reviewed_at": "2026-05-15T21:44:00-07:00",
+  "reviewer": "codex_visual_review",
+  "notes": "Correction: preserve ambiguous contact type instead of forcing foot when the detector only supports unknown_contact.",
+  "decisions": [
+    {
+      "review_stem": "video-494_singular_display",
+      "item_id": "cand-r004-t001-0008950",
+      "kind": "touch",
+      "status": "approved",
+      "contact_type": "unknown_contact",
+      "evidence": "Accepted as a touch candidate, but the visual evidence is ambiguous enough that the contact type should remain unknown_contact rather than forced to foot."
+    }
+  ]
+}

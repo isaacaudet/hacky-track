@@ -1,0 +1,260 @@
+{
+  "reviewed_at": "2026-05-15T20:55:00-07:00",
+  "reviewer": "codex_visual_review",
+  "evidence_sources": [
+    "outputs/review_batches/sequence_sheets/touch__likely_reject_sequence_sheet.jpg",
+    "outputs/review_batches/sequence_sheets/drop_floor_sequence_sheet.jpg",
+    "outputs/review_batches/sequence_sheets/stall_sequence_sheet.jpg",
+    "outputs/review_batches/sequence_sheets/around_the_world_sequence_sheet.jpg",
+    "outputs/review_batches/decision_sheets/likely_approve_sheet.jpg",
+    "outputs/review_batches/decision_sheets/drop_floor_fullframe_sheet.jpg"
+  ],
+  "decisions": [
+    {
+      "review_stem": "video-506_singular_display-2",
+      "item_id": "cand-r001-aroun-0003550",
+      "kind": "around_the_world",
+      "status": "approved",
+      "trick_label": "around_the_world_outer_right",
+      "evidence": "Sequence shows the right leg circling around the sack after the stall/release; this matches the known ATW in video-506."
+    },
+    {
+      "review_stem": "video-352_singular_display-2",
+      "item_id": "cand-r009-aroun-0045592",
+      "kind": "around_the_world",
+      "status": "rejected",
+      "evidence": "Sequence shows normal ball travel and hand/foot movement, but no leg circle around the sack."
+    },
+    {
+      "review_stem": "video-445_singular_display",
+      "item_id": "cand-r001-aroun-0001266",
+      "kind": "around_the_world",
+      "status": "rejected",
+      "evidence": "Sequence shows a hand drop/toss and kick setup, not a completed around-the-world motion."
+    },
+    {
+      "review_stem": "video-439_singular_display",
+      "item_id": "cand-r001-aroun-0003831",
+      "kind": "around_the_world",
+      "status": "rejected",
+      "evidence": "Sequence shows the sack moving in open air with no visible leg circle around it."
+    },
+    {
+      "review_stem": "video-352_singular_display-2",
+      "item_id": "cand-r005-drop_-0022896",
+      "kind": "drop_floor",
+      "status": "approved",
+      "evidence": "Sequence/full-frame evidence shows the sack low on the ground between contacts at the known internal reset around 22.9s."
+    },
+    {
+      "review_stem": "video-352_singular_display-2",
+      "item_id": "cand-r008-drop_-0038327",
+      "kind": "drop_floor",
+      "status": "approved",
+      "evidence": "Full-frame sequence shows the sack visibly on grass at the reset point."
+    },
+    {
+      "review_stem": "video-352_singular_display-2",
+      "item_id": "cand-r010-drop_-0046026",
+      "kind": "drop_floor",
+      "status": "approved",
+      "evidence": "Full-frame sequence shows the sack low/on grass during a reset gap."
+    },
+    {
+      "review_stem": "video-494_singular_display",
+      "item_id": "cand-r004-drop_-0010880",
+      "kind": "drop_floor",
+      "status": "approved",
+      "evidence": "Sequence shows the sack down on the grass after the contact run."
+    },
+    {
+      "review_stem": "video-478_singular_display",
+      "item_id": "cand-r001-drop_-0009850",
+      "kind": "drop_floor",
+      "status": "approved",
+      "evidence": "Sequence shows the sack down on the grass after the final contact."
+    },
+    {
+      "review_stem": "video-230_singular_display-2",
+      "item_id": "cand-r006-drop_-0030580",
+      "kind": "drop_floor",
+      "status": "rejected",
+      "evidence": "Full-frame sequence points at the bottom of the frame while the visible sack is airborne against sky/trees."
+    },
+    {
+      "review_stem": "video-296_singular_display-2",
+      "item_id": "cand-r002-drop_-0004130",
+      "kind": "drop_floor",
+      "status": "rejected",
+      "evidence": "Full-frame sequence shows the sack at/near the foot, not a floor reset."
+    },
+    {
+      "review_stem": "video-308_singular_display-2",
+      "item_id": "cand-r007-drop_-0021597",
+      "kind": "drop_floor",
+      "status": "rejected",
+      "evidence": "Full-frame sequence marks grass while the sack is visibly airborne/near the foot, not grounded."
+    },
+    {
+      "review_stem": "video-245_singular_display-2",
+      "item_id": "cand-r001-drop_-0004630",
+      "kind": "drop_floor",
+      "status": "rejected",
+      "evidence": "Full-frame sequence shows the sack on/near the shoe rather than on the floor."
+    },
+    {
+      "review_stem": "video-457_singular_display",
+      "item_id": "cand-r001-drop_-0001020",
+      "kind": "drop_floor",
+      "status": "rejected",
+      "evidence": "Full-frame sequence has no visible grounded sack at the marked reset point."
+    },
+    {
+      "review_stem": "video-457_singular_display",
+      "item_id": "cand-r003-drop_-0004840",
+      "kind": "drop_floor",
+      "status": "rejected",
+      "evidence": "Full-frame sequence marks empty grass at the reset point; grounded sack evidence is missing."
+    },
+    {
+      "review_stem": "video-439_singular_display",
+      "item_id": "cand-r002-drop_-0004430",
+      "kind": "drop_floor",
+      "status": "rejected",
+      "evidence": "Full-frame sequence marks grass while the visible sack is elsewhere, so this is not a floor contact."
+    },
+    {
+      "review_stem": "video-352_singular_display-2",
+      "item_id": "cand-r002-t001-0002830",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Touch sequence shows the candidate away from foot contact; the marked event is not a kick/knee/stall contact."
+    },
+    {
+      "review_stem": "video-352_singular_display-2",
+      "item_id": "cand-r003-t001-0006920",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Touch sequence shows the sack moving in open space with no foot/knee contact at the marked time."
+    },
+    {
+      "review_stem": "video-352_singular_display-2",
+      "item_id": "cand-r003-t004-0009220",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Touch sequence shows the sack passing low/away from the foot; no contact at the candidate time."
+    },
+    {
+      "review_stem": "video-230_singular_display-2",
+      "item_id": "cand-r002-t007-0017650",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Sequence shows the sack airborne and away from foot/knee contact at the candidate time."
+    },
+    {
+      "review_stem": "video-296_singular_display-2",
+      "item_id": "cand-r001-t001-0001810",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Sequence shows a hand/drop context and open-air sack motion, not a foot/knee touch."
+    },
+    {
+      "review_stem": "video-296_singular_display-2",
+      "item_id": "cand-r005-t001-0015840",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Sequence shows the sack airborne and away from the foot at the candidate time."
+    },
+    {
+      "review_stem": "video-506_singular_display-2",
+      "item_id": "cand-r002-t001-0006010",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Sequence shows the sack falling/open-air near the hand/leg, not a foot/knee contact."
+    },
+    {
+      "review_stem": "video-308_singular_display-2",
+      "item_id": "cand-r006-t001-0019220",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Sequence shows the sack in open air with no visible foot/knee contact at the marked time."
+    },
+    {
+      "review_stem": "video-332_singular_display-2",
+      "item_id": "cand-r004-t001-0017290",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Sequence shows a hand/release context and no foot/knee touch at the candidate time."
+    },
+    {
+      "review_stem": "video-474_singular_display",
+      "item_id": "cand-r002-t002-0005430",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Sequence shows the sack passing near the leg but not contacting the foot/knee at the marked instant."
+    },
+    {
+      "review_stem": "video-340_singular_display-2",
+      "item_id": "cand-r003-t007-0006750",
+      "kind": "touch",
+      "status": "rejected",
+      "evidence": "Sequence shows the sack separated from the foot at the marked event time."
+    },
+    {
+      "review_stem": "video-352_singular_display-2",
+      "item_id": "cand-r006-t005-0026740",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Decision sheet shows the sack on the foot at the candidate frame."
+    },
+    {
+      "review_stem": "video-490_singular_display",
+      "item_id": "cand-r003-t002-0008750",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Decision sheet shows visible foot contact with the sack."
+    },
+    {
+      "review_stem": "video-234_singular_display-2",
+      "item_id": "cand-r002-t001-0004290",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Decision sheet shows the sack contacting the foot."
+    },
+    {
+      "review_stem": "video-498_singular_display",
+      "item_id": "cand-r003-t003-0006720",
+      "kind": "touch",
+      "status": "approved",
+      "evidence": "Decision sheet shows the sack near the foot at contact timing."
+    },
+    {
+      "review_stem": "video-352_singular_display-2",
+      "item_id": "cand-r005-stall-0020070",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "Stall sequence shows the sack moving through the air; it is not held on the foot."
+    },
+    {
+      "review_stem": "video-296_singular_display-2",
+      "item_id": "cand-r001-stall-0001730",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "Stall sequence shows airborne motion and no held contact."
+    },
+    {
+      "review_stem": "video-344_singular_display-2",
+      "item_id": "cand-r001-stall-0001220",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "Stall sequence shows a moving ball rather than a held stall window."
+    },
+    {
+      "review_stem": "video-469_singular_display",
+      "item_id": "cand-r001-stall-0006550",
+      "kind": "stall",
+      "status": "rejected",
+      "evidence": "Stall sequence shows continued ball travel rather than a stable held contact."
+    }
+  ]
+}

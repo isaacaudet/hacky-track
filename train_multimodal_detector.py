@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import tempfile
@@ -26,6 +27,7 @@ from sklearn.metrics import classification_report
 from sklearn.model_selection import train_test_split
 
 from hacky_mvp import AudioPeak, detect_audio_peaks, extract_mono_wav
+from detect_atw_overlay import detect_ball
 from paint_hud import detect_bag_center
 from scan_training_data import candidate_event_doc, group_peaks, video_meta
 
@@ -33,6 +35,8 @@ from scan_training_data import candidate_event_doc, group_peaks, video_meta
 DEFAULT_CHECKED_EVENTS = Path("data/video-50_singular_display.events.json")
 DEFAULT_CHECKED_ANCHORS = Path("data/video-50_singular_display.paint_anchors.json")
 DEFAULT_CHECKED_VIDEO = Path("/Users/isaacaudet/Downloads/video-50_singular_display.MOV")
+DEFAULT_VIDEO506_EVENTS = Path("data/video-506_singular_display.events.json")
+DEFAULT_VIDEO506 = Path("/Users/isaacaudet/Downloads/video-506_singular_display.MOV")
 
 
 @dataclass
@@ -145,12 +149,51 @@ def patch_features(patch: np.ndarray) -> np.ndarray:
 def colorful_mask(frame: np.ndarray) -> np.ndarray:
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     h, s, v = hsv[:, :, 0], hsv[:, :, 1], hsv[:, :, 2]
+    red_orange = ((h <= 18) | (h >= 165))
     yellow_green = (h >= 14) & (h <= 96)
     blue = (h >= 96) & (h <= 138)
-    mask = ((s > 42) & (v > 38) & (yellow_green | blue)).astype(np.uint8) * 255
+    mask = ((s > 42) & (v > 38) & (red_orange | yellow_green | blue)).astype(np.uint8) * 255
     kernel = np.ones((3, 3), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
     return mask
+
+
+def collect_video506_checked_samples(
+    positives: list[np.ndarray],
+    negatives: list[np.ndarray],
+    rng: np.random.Generator,
+    out_size: tuple[int, int],
+    patch_size: int,
+) -> dict[str, int]:
+    if not (DEFAULT_VIDEO506.exists() and DEFAULT_VIDEO506_EVENTS.exists()):
+        return {"positive": 0, "negative": 0}
+    doc = read_json(DEFAULT_VIDEO506_EVENTS)
+    cap = cv2.VideoCapture(str(DEFAULT_VIDEO506))
+    if not cap.isOpened():
+        return {"positive": 0, "negative": 0}
+    pos_before = len(positives)
+    neg_before = len(negatives)
+    previous_ball: tuple[float, float, float] | None = None
+    for rally in doc.get("rallies", []):
+        for event in rally.get("events", []):
+            if event.get("type") not in {"touch", "stall"}:
+                continue
+            for offset in (-0.045, 0.0, 0.045):
+                frame = read_resized_frame(cap, float(event["time_sec"]) + offset, out_size)
+                if frame is None:
+                    continue
+                ball, conf = detect_ball(frame, previous_ball)
+                if ball is None or conf < 0.05:
+                    continue
+                previous_ball = ball
+                x, y, _radius = ball
+                positives.append(crop_patch(frame, x, y, patch_size))
+                negatives.extend(sample_random_negatives(frame, [(x, y)], rng, 5, patch_size))
+                for px, py, _ in proposals_for_frame(frame)[:12]:
+                    if math.hypot(px - x, py - y) >= patch_size * 1.25:
+                        negatives.append(crop_patch(frame, px, py, patch_size))
+    cap.release()
+    return {"positive": len(positives) - pos_before, "negative": len(negatives) - neg_before}
 
 
 def region_stats(contour: np.ndarray) -> tuple[float, float, int, int, int, int, float, float]:
@@ -215,11 +258,18 @@ def best_proposal(
     patch_size: int,
 ) -> tuple[float | None, float | None, float, str]:
     proposals = proposals_for_frame(frame, previous)
+    red_previous = None if previous is None else (previous[0], previous[1], patch_size / 3.0)
+    red_ball, red_conf = detect_ball(frame, red_previous)
+    if red_ball is not None and red_conf >= 0.06:
+        rx, ry, _radius = red_ball
+        proposals.insert(0, (rx, ry, "red-ball"))
     if not proposals:
         return None, None, 0.0, "none"
     features = np.stack([patch_features(crop_patch(frame, x, y, patch_size)) for x, y, _ in proposals])
     probs = model.predict_proba(features)[:, 1]
     adjusted = probs.copy()
+    if red_ball is not None and red_conf >= 0.06:
+        adjusted[0] = max(float(adjusted[0]), min(1.0, 0.34 + 0.58 * red_conf))
     if previous is not None:
         for idx, (x, y, _) in enumerate(proposals):
             dist = math.hypot(x - previous[0], y - previous[1])
@@ -244,10 +294,33 @@ def sample_random_negatives(frame: np.ndarray, avoid: list[tuple[float, float]],
 
 
 def audio_peaks_for_video(video: Path, min_z: float, min_gap_sec: float) -> list[AudioPeak]:
+    stat = video.stat()
+    cache_root = Path("outputs/audio_peak_cache")
+    cache_root.mkdir(parents=True, exist_ok=True)
+    key_source = f"{video.resolve()}:{stat.st_size}:{stat.st_mtime_ns}:{min_z:.3f}:{min_gap_sec:.3f}"
+    cache_path = cache_root / f"{video.stem}.{hashlib.sha1(key_source.encode('utf-8')).hexdigest()[:16]}.json"
+    if cache_path.exists():
+        try:
+            items = json.loads(cache_path.read_text(encoding="utf-8"))
+            return [AudioPeak(float(item["time_sec"]), float(item["z_score"]), float(item["rms"])) for item in items]
+        except Exception:
+            cache_path.unlink(missing_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
         wav = Path(tmp) / "audio.wav"
         extract_mono_wav(video, wav)
-        return detect_audio_peaks(wav, min_z=min_z, min_gap_sec=min_gap_sec)
+        peaks = detect_audio_peaks(wav, min_z=min_z, min_gap_sec=min_gap_sec)
+    cache_path.write_text(
+        json.dumps(
+            [
+                {"time_sec": peak.time_sec, "z_score": peak.z_score, "rms": peak.rms}
+                for peak in peaks
+            ],
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return peaks
 
 
 def high_confidence_auto_centers(video: Path, peaks: list[AudioPeak], out_size: tuple[int, int], z_min: float) -> list[tuple[float, float, float]]:
@@ -303,6 +376,10 @@ def collect_training_samples(
     cap.release()
     report["positive_sources"]["checked_video_50_anchor_samples"] = checked_count
     report["negative_sources"]["checked_video_50_random"] = len(negatives)
+
+    video506_counts = collect_video506_checked_samples(positives, negatives, rng, out_size, patch_size)
+    report["positive_sources"]["checked_video_506_red_ball_samples"] = video506_counts["positive"]
+    report["negative_sources"]["checked_video_506_random_and_hard"] = video506_counts["negative"]
 
     for video in videos:
         peaks = audio_peaks_for_video(video, min_z=6.0, min_gap_sec=0.32)
@@ -563,6 +640,8 @@ def detect_touches(
         away_from_edge = det.x is not None and out_size[0] * 0.035 <= det.x <= out_size[0] * 0.965
         if not (in_contact_zone and away_from_edge):
             continue
+        if peak.z_score < 8.0 and motion_score < 0.55:
+            continue
         score = 0.38 * audio_score + 0.36 * visual + 0.26 * motion_score
         if visual >= 0.34 and score >= 0.42:
             candidates.append(
@@ -578,8 +657,39 @@ def detect_touches(
                 )
             )
 
-    # Add visual-only bounces to catch quieter contacts.
+    # Recover clear impact spikes when the visual tracker drops the sack for a
+    # few frames. These are not sound-only labels: the interpolated track still
+    # has to place the bag in a playable zone.
     times, xs, ys, scores = interpolated_track(detections, out_size)
+    for peak in peaks:
+        if peak.z_score < 10.0 or any(abs(peak.time_sec - cand.time_sec) <= 0.22 for cand in candidates):
+            continue
+        idx = int(np.clip(np.searchsorted(times, peak.time_sec), 0, len(times) - 1))
+        y_ratio = float(ys[idx]) / out_size[1]
+        away_from_edge = out_size[0] * 0.04 <= xs[idx] <= out_size[0] * 0.96
+        if y_ratio < 0.32 or not away_from_edge:
+            continue
+        audio_score = min(1.0, peak.z_score / 24.0)
+        visual = float(scores[idx])
+        motion_score = float(motion[idx])
+        score = 0.62 * audio_score + 0.18 * max(visual, 0.18) + 0.20 * motion_score
+        if score < 0.40:
+            continue
+        candidates.append(
+            TouchCandidate(
+                time_sec=peak.time_sec,
+                score=score,
+                source="audio+track-context",
+                audio_z=peak.z_score,
+                visual_score=visual,
+                motion_score=motion_score,
+                x=float(xs[idx]),
+                y=float(ys[idx]),
+            )
+        )
+
+    # Add rare visual bounces to catch quieter contacts without letting floor
+    # texture or stall setup frames dominate the event list.
     if len(times) >= 5:
         dt = max(float(np.median(np.diff(times))), 1 / 30)
         vy = np.gradient(ys, dt)
@@ -591,6 +701,9 @@ def detect_touches(
             if ys[i] / out_size[1] < 0.40 or xs[i] < out_size[0] * 0.045 or xs[i] > out_size[0] * 0.955:
                 continue
             if scores[i] < 0.64 or motion[i] < 0.58:
+                continue
+            near_audio = any(abs(float(times[i]) - peak.time_sec) <= 0.16 and peak.z_score >= audio_min_z for peak in peaks)
+            if scores[i] < 0.82 or motion[i] < 0.75 or not near_audio:
                 continue
             if any(abs(times[i] - cand.time_sec) <= 0.28 for cand in candidates):
                 continue
@@ -607,7 +720,7 @@ def detect_touches(
                 )
             )
 
-    merged = merge_candidates(candidates, min_gap_sec=0.32)
+    merged = merge_candidates(candidates, min_gap_sec=0.24)
     return [cand for cand in merged if cand.score >= 0.44]
 
 

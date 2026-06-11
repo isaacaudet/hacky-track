@@ -1,0 +1,487 @@
+# Hacky Track v1.0 Rally Intelligence Readiness
+
+## Verdict
+
+`not_ready_for_v1_0`
+
+v0.1 generic touch timing and the OWLv2/L2 HUD path are release-shaped. v1.0 rally intelligence is the next layer: left/right, inner/outer, knee, stall/drop, tricks, and calibrated HUD badges. The current code now has the right training/evaluation scaffolding and the first contact classifier, but side and surface are not accurate enough to ship as broad product facts.
+
+## Current Evidence
+
+### Touch Timing / HUD Baseline
+
+Current artifact:
+
+```text
+runs/release-27-public/touch_corpus_v1/touch_pipeline_status.md
+```
+
+Current merged-event touch status:
+
+| split | precision | recall | F1 | gate |
+| --- | ---: | ---: | ---: | --- |
+| leave-clips-out CV | 0.925 | 0.896 | 0.910 | pass |
+| frozen test | 0.979 | 0.986 | 0.982 | pass |
+
+Interpretation:
+
+- Frozen-test touch timing is release-shaped, especially with reviewed visual HUD overrides.
+- Leave-clips-out CV now passes after including both OWLv2 detection caches in the L2 feature attachment path.
+- The prior `video-340_singular_display-2` failure was a missing-cache problem, not a classifier weakness: the main cache omitted the clip, while `owlv2_touch_detections_contact_missing_v1/detections.jsonl` contains the needed detections.
+- `video-344_singular_display-2` remains the weakest automatic-touch clip, but the aggregate merged-event gate now passes.
+
+### Contact Classifier
+
+Current artifact:
+
+```text
+runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/release_contact_classifier_report.md
+```
+
+Current matched reviewed labels:
+
+| target | rows | classes |
+| --- | ---: | --- |
+| contact type | 82 | kick 75, stall 7 |
+| side | 76 | right 51, left 25; all `wearer_limb` side basis |
+| surface | 25 | outer 18, inner 7 |
+
+Clip-disjoint leave-one-video-out results:
+
+| target | accuracy | balanced accuracy | gate | selected feature mode | interpretation |
+| --- | ---: | ---: | --- | --- | --- |
+| contact type | 0.951 | 0.844 | raw pass / release-scope fail | no_vision_embedding_no_tracking_features + gradient boosting | Balanced model selection improves stall recall to 0.714 while preserving a raw pass, but class coverage blocks full v1.0: stall 7, knee 0, drop_floor 0. |
+| side | 0.776 raw; 0.816 smoothed diagnostic | 0.752 raw; 0.791 smoothed diagnostic | fail | no_visual_features_no_tracking_features + linear SVC; temporal sequence smoothing | Bounded LinearSVC remains best after CoTracker; diagnostic sequence smoothing helps, but still misses the 0.85 side gate and remains unpromoted. |
+| surface | 0.760 | 0.702 | fail | pose_only + linear SVC | Balanced model selection raises inner recall to 0.571, but raw accuracy remains below the 0.85 gate and the target is still label-limited. |
+
+Release label gaps from the current reviewed event files:
+
+| target | current class counts | additional labels needed before release scope |
+| --- | --- | --- |
+| contact type | kick 75, stall 7, knee 0, drop_floor 0 | stall +13, knee +20, drop_floor +20 |
+| side | left 25, right 51 | class-count floor met; model accuracy still fails |
+| surface | inner 7, outer 18 | inner +13, outer +2 |
+
+The event-file inventory confirms the surface gap is real, not a parser miss:
+250 reviewed events contain 84 type labels, 78 wearer-side labels, 25 inner/outer
+surface labels, and 124 explicit `unknown` surface labels.
+
+Feature-mode ablation:
+
+| target | current best | balanced accuracy | prior logistic baseline | result |
+| --- | ---: | ---: | ---: | --- |
+| contact type | 0.951 | 0.844 | 0.902 | Gradient boosting with no tracking/embedding features gives the best balanced kick/stall behavior; release-scope coverage is still missing stall/knee/drop labels. |
+| side | 0.776 raw; 0.816 smoothed diagnostic | 0.752 raw; 0.791 smoothed diagnostic | 0.628 | LinearSVC on non-visual scalar features is the best current side model; sequence smoothing is a useful diagnostic lift but still not enough for promotion. |
+| surface | 0.760 | 0.702 | 0.760 | Pose-only LinearSVC is the best balanced surface model; it still cannot clear the gate from 7 inner rows. |
+
+Confidence/abstention does not rescue the failing targets:
+
+- Side stays below gate; the selected model reaches 0.776 full coverage / 0.752 balanced accuracy. Diagnostic temporal smoothing improves the same held-out rows to 0.816 / 0.791 by changing 9 rows, but it still misses the 0.85 release gate and is not used for automatic HUD promotion. High-confidence abstention reaches 0.857 only at 27.6% coverage, too sparse for automatic HUD promotion.
+- All current approved/training side labels are now `wearer_limb`, inferred from the side-specific trick labels you already reviewed.
+- Surface stays below gate; selected model is 0.760 raw / 0.702 balanced accuracy and remains label-limited below release scope.
+- Contact type has a raw accuracy pass, but the new release-scope gate correctly keeps it unpromoted until stall/knee/drop_floor class coverage reaches the release floor.
+
+### Pose / Body Proximity
+
+Pose/body geometry is attached and cached:
+
+```text
+runs/release-27-public/touch_corpus_v1/touch_training_dataset_v1/touch_pose_feature_report.md
+```
+
+Current coverage:
+
+| rows | pose present | usable pose distance |
+| ---: | ---: | ---: |
+| 624 | 290 | 268 |
+
+For reviewed contact rows specifically: type has 61/82 usable pose rows, side
+has 57/76, and surface has 20/25. Completing stale pose-cache misses helped
+contact type slightly but did not move side/surface over their gates.
+
+Interpretation:
+
+- RTMW/wholebody keypoints are useful as soft features.
+- They are not reliable enough as hard gates in Ray-Ban Meta POV footage.
+- Side is especially unreliable because model anatomical left/right and user-visible contact side are not stable in egocentric partial-foot frames.
+
+### Visual Crop Features
+
+New artifact:
+
+```text
+runs/release-27-public/touch_corpus_v1/touch_training_dataset_v1/touch_visual_crop_feature_report.md
+```
+
+Current coverage:
+
+| split | rows | ok crop rows |
+| --- | ---: | ---: |
+| train + validation | 283 | 249 |
+| frozen test | 341 | 277 |
+
+Interpretation:
+
+- Ball-centered visual crops are now attached as cached candidate-level features.
+- They are useful only when paired with the stronger frozen OWLv2 embedding for surface classification.
+- The classifier now selects feature groups per target so a net-negative visual branch cannot silently ship.
+
+### Frozen Vision Embeddings
+
+New artifact:
+
+```text
+runs/release-27-public/touch_corpus_v1/touch_training_dataset_v1/touch_vision_embedding_feature_report.md
+```
+
+Current reviewed-contact coverage:
+
+| split | requested | ok embeddings |
+| --- | ---: | ---: |
+| train + validation | 17 | 17 |
+| frozen test | 65 | 65 |
+
+Interpretation:
+
+- Reusing OWLv2 as a frozen crop encoder is technically viable and fully cached for reviewed contact labels.
+- It is slow on MPS and should remain an explicit v1.0 prep step, not default release processing.
+- Visual features improve inner/outer surface accuracy from 0.640 to 0.760, but still miss the 0.85 gate.
+- It does not solve side; side remains a label/semantics/egocentric-foot-identity problem.
+
+### Foot-Track Features
+
+New artifact:
+
+```text
+runs/release-27-public/touch_corpus_v1/touch_training_dataset_v1/touch_foot_track_feature_report.md
+```
+
+Current coverage:
+
+| split | rows | automatic foot-track rows | manual-calibrated rows |
+| --- | ---: | ---: | ---: |
+| train + validation | 283 | 147 | 9 |
+| frozen test | 341 | 121 | 114 |
+
+Interpretation:
+
+- There is no prebuilt library that directly outputs Ray-Ban POV footbag
+  `left_inner_kick` / `right_outer_stall` semantics. The practical prebuilt
+  backend is RTMW/rtmlib: it supplies lower-body and foot landmarks.
+- `attach_touch_foot_track_features.py` now builds label-free temporal
+  foot-continuity features (`foot_track_*`) from those RTMW landmarks.
+- The same stage also writes label-derived `manual_foot_*` calibration fields
+  from existing reviewed trick labels, but those are excluded from automatic
+  classifier features and are only suitable for manual/visual-corrected display
+  workflows.
+- In the current clip-disjoint metrics, automatic foot-track features do not
+  improve side or surface enough to promote automatic HUD badges. The classifier
+  therefore keeps no-foot-track feature modes available and selects them where
+  foot-track features hurt.
+
+### CoTracker Features
+
+New artifact:
+
+```text
+runs/release-27-public/touch_corpus_v1/touch_training_dataset_v1/touch_cotracker_feature_report.md
+```
+
+Current coverage:
+
+| split | processed rows | usable CoTracker rows | missing seed rows |
+| --- | ---: | ---: | ---: |
+| train + validation | 17 | 11 | 6 |
+| frozen test | 65 | 52 | 13 |
+
+Interpretation:
+
+- CoTracker3 was tested as the stronger prebuilt tracking component. RTMW seeded
+  foot landmarks; CoTracker propagated them through 0.4-second local windows.
+- The implementation works locally on MPS and produced 63 usable tracked windows
+  out of 82 processed contact-labeled candidates.
+- It did not improve the release classifier. Side remains 0.776 raw / 0.752
+  balanced, and the selected side/contact-type models use no-tracking modes
+  where tracking features hurt.
+- This points away from generic foot-point tracking as the immediate blocker.
+  The remaining side/surface failures need either stronger local visual
+  understanding of the ball+shoe crop, more balanced inner/outer labels, or
+  manual/visual-corrected badge workflows.
+
+### Local Ball+Shoe Mask Features
+
+New artifact:
+
+```text
+runs/release-27-public/touch_corpus_v1/touch_training_dataset_v1/touch_local_mask_feature_report.md
+```
+
+Current reviewed-contact coverage:
+
+| split | requested rows | ok rows | component rows |
+| --- | ---: | ---: | ---: |
+| train + validation | 17 | 17 | 15 |
+| frozen test | 65 | 65 | 49 |
+
+Interpretation:
+
+- `attach_touch_local_mask_features.py` implements a dependency-light proxy for
+  SAM2-style local foot/shoe masks: polar sectors around the ball, edge/texture
+  density, and nearest connected component geometry.
+- It was measured on all 82 reviewed contact rows.
+- It does not clear the side or surface gates. The best local-mask side mode
+  reaches 0.789 raw accuracy, but only 0.731 balanced accuracy, so the selected
+  side model remains the older non-visual scalar LinearSVC at 0.776 / 0.752.
+- Surface local-mask modes stay at 0.760 / 0.615; the selected balanced surface
+  model is still pose-only at 0.760 / 0.702.
+- This points away from hand-built local crop masks as the release fix. If we
+  need visual side/surface inference, the next credible route is a learned
+  crop/contact model with more balanced labels, not another heuristic mask.
+
+### Contact Error Audit
+
+New artifact:
+
+```text
+runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/contact_error_audit/contact_error_audit_report.md
+```
+
+Current error buckets:
+
+| bucket | count | meaning |
+| --- | ---: | --- |
+| pose_missing | 6 | Pose unavailable at contact time. |
+| pose_side_disagreement | 6 | Pose side conflicts with the reviewed side. |
+| side_visual_ambiguity | 5 | Image crop/embedding/local-mask features still cannot infer side reliably. |
+| surface_label_or_geometry_ambiguity | 4 | Inner/outer needs more labels despite geometry/embedding/mask features. |
+| type_motion_ambiguity | 3 | Mostly stall/kick errors; needs dwell/control features and more stall labels. |
+| pose_surface_disagreement | 2 | Pose foot-edge geometry conflicts with reviewed surface. |
+| stall_window_confusion | 1 | Contact-type model confuses one kick/stall window. |
+
+Representative strips are rendered under:
+
+```text
+runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/contact_error_audit/strips/
+```
+
+Sequence-smoothed side audit:
+
+```text
+runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/contact_error_audit/contact_side_sequence_smoothed_error_audit.jsonl
+runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/contact_error_audit/sequence_smoothed_strips/
+```
+
+Temporal smoothing reduces side errors from 17 to 14. The remaining smoothed
+side failures are still mixed: 4 pose-side disagreements, 6 visual-ambiguity
+cases, and 4 pose-missing cases. That proves smoothing is a useful diagnostic
+feature, but not a sufficient release strategy.
+
+### Side Semantics Audit
+
+New artifact:
+
+```text
+runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/side_semantics_audit/side_semantics_audit_report.md
+```
+
+This audit compares reviewed `left/right` labels against four conventions:
+
+- RTMW anatomical side from nearest lower-body/foot keypoints.
+- Flipped RTMW anatomical side.
+- Screen side of the ball.
+- Flipped screen side.
+
+Global mapping scores:
+
+| predictor | covered | coverage | accuracy |
+| --- | ---: | ---: | ---: |
+| pose anatomical | 50 | 0.658 | 0.540 |
+| pose flipped | 50 | 0.658 | 0.460 |
+| screen ball | 76 | 1.000 | 0.553 |
+| screen ball flipped | 76 | 1.000 | 0.447 |
+| screen ball, 0.08 center deadzone | 15 | 0.197 | 0.733 |
+
+Interpretation:
+
+- No global convention is strong enough to use as a side classifier.
+- One clip is consistent with flipped screen side, a few clips weakly match screen side, and several are mixed.
+- Visual strips show both directions of failure: some true labels align with pose while screen side disagrees, and other clips have pose side inverted relative to the reviewed label.
+- Side is therefore a semantic/reviewer-definition problem before it is a model-capacity problem.
+
+Representative strips are rendered under:
+
+```text
+runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/side_semantics_audit/strips/
+```
+
+### HUD Contact Badges
+
+New artifact:
+
+```text
+runs/release-27-public/touch_corpus_v1/release_touch_hud_v8_contact_badges_frozen_corrected/release_touch_hud_report.md
+```
+
+Frozen-test corrected HUD analytics:
+
+```text
+runs/release-27-public/touch_corpus_v1/release_touch_hud_v8_contact_badges_frozen_corrected/analytics_frozen_only/release_rally_analytics.md
+```
+
+Current frozen-test HUD status:
+
+| scope | touch P/R/F1 | manual badges | side badges | surface badges | interpretation |
+| --- | --- | ---: | ---: | ---: | --- |
+| frozen-test corrected HUD | 1.000 / 0.993 / 0.996 | 64 | 64 | 21 | Manual reviewed contact labels render correctly; automatic side/surface classifiers remain unpromoted. |
+
+Interpretation:
+
+- The HUD can now show reviewed `left_kick`, `right_outer_kick`, `left_inner_kick`, knee, and stall-style labels when they came from visual labels.
+- These badges are label-backed/manual display facts, not model-predicted contact intelligence.
+- Generic reviewed touches with no contact detail do not show a fake `reviewed_touch` badge.
+
+## What Changed In This Pass
+
+Code changes:
+
+- `attach_touch_visual_crop_features.py` adds cached ball-centered visual crop descriptors and normalized ball position features.
+- `attach_touch_vision_embedding_features.py` adds cached frozen OWLv2 crop embeddings for reviewed contact rows or all rows.
+- `attach_touch_foot_track_features.py` adds RTMW-based temporal foot-continuity features and separate label-derived manual foot calibration fields.
+- `attach_touch_cotracker_features.py` adds optional CoTracker3 foot-continuity features seeded from RTMW foot landmarks.
+- `run_touch_pipeline.py` can attach visual crop features via `--attach-visual-crop-features` and reports their status.
+- `run_touch_pipeline.py` can attach OWLv2 crop embeddings via `--attach-vision-embedding-features` and reports their status.
+- `run_touch_pipeline.py` can attach foot-track features via `--attach-foot-track-features` and reports automatic/manual-calibrated foot-track coverage.
+- `run_touch_pipeline.py` can attach CoTracker features via `--attach-cotracker-features` and reports processed/usable CoTracker rows.
+- `train_release_contact_classifier.py` now evaluates feature modes per target and stores selected target-specific modes in the model artifact.
+- `train_release_contact_classifier.py` includes automatic `foot_track_*` features but excludes label-derived `manual_foot_*` calibration fields from automatic model inputs.
+- `train_release_contact_classifier.py` includes automatic `cotracker_*` features and no-tracking feature modes so CoTracker can be measured without forcing release regressions.
+- `train_release_contact_classifier.py` now evaluates bounded model families per target (`logistic_regression`, `ridge_classifier`, `linear_svc`, `extra_trees`, `gradient_boosting`) and stores the selected family in the model artifact.
+- `train_release_contact_classifier.py` now reports diagnostic temporal smoothing for side sequences; it improves held-out side accuracy but remains unpromoted until the 0.85 gate clears.
+- `train_release_contact_classifier.py` now reports selective accuracy by prediction confidence, so abstention claims are measurable.
+- `train_release_contact_classifier.py` now reports balanced accuracy/per-class recall and uses balanced accuracy as a tie-breaker when raw leave-one-video-out accuracy is equal.
+- `train_release_contact_classifier.py` now separates raw accuracy gates from release-scope gates, so kick/stall accuracy cannot be promoted as full kick/knee/stall/drop intelligence until class coverage exists.
+- `contact_error_audit.py` renders visual strips for current contact classifier errors and sequence-smoothed side errors, clears stale strips before rendering, and buckets failures by likely mode.
+- `render_touch_release_hud.py` now attaches reviewed contact labels to matched merged touch events as manual HUD badges, with provenance and match deltas.
+- `render_touch_release_hud.py` and `hackytrack.py touch-release` now accept multiple OWLv2 detection JSONLs, so supplemental contact-missing caches are not silently dropped.
+- `run_touch_pipeline.py` now records the actual detection JSONL inputs in the status report and prints a reproducible release command using those inputs.
+- `release_rally_analytics.py` now reports aggregate/per-video best rally, touch rate, longest gap, rendered reviewed stall/drop counts, exact FP/FN times, and manual contact badge coverage separately from automatic touch metrics.
+- `side_semantics_audit.py` audits side labels against pose and screen-side conventions, with visual disagreement strips.
+- `touch_review_app.py` and contact-label parsing support the full label vocabulary: left/right kick, inner/outer, knee, stall, and ground/drop.
+- `touch_review_app.py` now persists `contact_side_basis` and explicitly defines side as the contacting limb / wearer side, not screen-left/right.
+- `touch_review_app.py` and `train_release_contact_classifier.py` now infer `contact_side_basis=wearer_limb` from side-specific trick labels such as `left_inner_kick` and `right_stall`.
+- `touch_review_app.py` now surfaces side-basis debt directly: progress shows usable wearer-side labels vs legacy left/right labels, and `Next side-basis` jumps through legacy side labels that need explicit basis review.
+- `touch_review_app.py` now includes side-basis debt in the global summary, video list, and review queue, with a `Load next side-basis clip` path separate from touch-hint review.
+- `train_release_contact_classifier.py` preserves side-basis metadata and ignores side labels explicitly marked `screen_position`, `pose_anatomical`, `ambiguous`, or `unknown` for wearer-side training.
+- `migrate_contact_side_basis.py` promoted 69 previously saved side-specific trick labels to explicit `wearer_limb` basis in 6 reviewed label files.
+
+Browser smoke artifact:
+
+```text
+runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/side_semantics_audit/review_app_side_basis_smoke.png
+runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/side_semantics_audit/review_app_side_basis_progress_smoke.png
+runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/side_semantics_audit/review_app_side_basis_queue_smoke.png
+runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/side_semantics_audit/review_app_side_basis_migrated_smoke.png
+```
+
+Migration artifact:
+
+```text
+runs/release-27-public/touch_corpus_v1/release_contact_classifier_v1/side_semantics_audit/contact_side_basis_migration_report.json
+```
+
+Tests:
+
+```text
+python3 -m unittest discover tests
+```
+
+Current result:
+
+```text
+Ran 296 tests in 33.153s
+OK
+```
+
+## Library Reality Check
+
+Side/contact-surface detection is not solved by a library. Current libraries solve foot landmarks, not footbag contact semantics.
+
+- RTMW/wholebody pose estimates body, face, hand, and foot keypoints, including foot landmarks, which is the right landmark source.
+- COCO-WholeBody-style feet expose keypoints, not semantic “inside/outside kick” labels.
+- MediaPipe-style pose/wholebody can provide heel/toe landmarks, but not footbag-specific contact classification.
+
+So the correct v1.0 path is custom classification on top of:
+
+- OWLv2/L2 ball center and trajectory.
+- RTMW foot/knee landmarks as soft features.
+- Visual crop embeddings/classifier for the local ball+foot patch.
+- Reviewed side/type/surface/stall/drop labels.
+
+Sources used for this conclusion:
+
+- [RTMW paper](https://arxiv.org/abs/2407.08634)
+- [RTMW model card](https://huggingface.co/akore/rtmw-l-384x288)
+- [COCO-WholeBody dataset summary](https://paperswithcode.com/dataset/coco-wholebody)
+- [MediaPipe Pose Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker)
+
+## v1.0 Promotion Gates
+
+Do not render these as product facts until the gate passes.
+
+| signal | minimum labels | release gate | current state |
+| --- | ---: | --- | --- |
+| left/right side | >=20 explicit wearer-limb labels per promoted class, >=3 videos | >=85% clip-disjoint side accuracy | 76 wearer-limb rows, 0.776 raw / 0.752 balanced accuracy; sequence-smoothed diagnostic 0.816 / 0.791, fail |
+| inner/outer surface | >=20 per promoted class, >=3 videos | >=85% clip-disjoint surface accuracy | 25 rows, 0.760 raw / 0.702 balanced accuracy, fail; needs +13 inner and +2 outer labels for release-scope coverage |
+| contact type: kick/knee/stall/drop | >=20 per promoted class, >=3 videos | >=85% contact-type accuracy | 82 rows, 0.951 raw / 0.844 balanced accuracy, release-scope fail: stall 7, knee 0, drop_floor 0 |
+| drop/floor reset | enough reviewed positives and negatives across clips | precision >=90%, recall >=90% | 35 clean reviewed reset rows, 0.682 P / 0.714 R after rally-sequence reset features, fail |
+| stall | enough reviewed stall windows and non-stall controls | precision >=85%, recall >=80% | 32 clean reviewed stall candidates, but only 3 approved stalls, not-ready |
+| tricks | >=20 examples per promoted trick | >=80% held-out precision | not ready |
+
+## Next Engineering Work
+
+The next high-yield work is not more broad scalar model search. LinearSVC and
+pose-only feature selection and side sequence smoothing bought small held-out
+lifts. CoTracker foot tracks and local ball+shoe mask features are now
+implemented and measured, but both side and surface remain below gate. The
+remaining work is better inner/outer/stall/knee/drop coverage plus either a
+learned egocentric ball+foot crop/contact model or a manual/visual-corrected
+badge workflow.
+
+1. Improve side semantics:
+   - The audit shows current labels are not explained by a single pose-side or screen-side convention.
+   - Do not manually redo existing side-specific trick labels; they now count as `wearer_limb`.
+   - Future side labels should still use `wearer_limb` only when the contacting limb is visually clear; use unknown/ambiguous otherwise.
+   - Keep screen-position or pose-anatomical observations as audit metadata, not wearer-side training labels.
+   - Do not expect a prebuilt foot tracker to solve wearer-side semantics; RTMW,
+     CoTracker, and local-mask features have been measured and remain below gate.
+   - If automatic side remains a product requirement, train a learned crop/contact
+     model from ball+foot image patches after adding more balanced labels.
+2. Rework drop/stall as a sequence problem:
+   - The new stall/drop audit removes the missing-cache confound: all 67 clean rows now have OWLv2/L2 features.
+   - Sequence-window/floor-context features improve the prior L2-only drop baseline from 0.609/0.667 to 0.652/0.714 precision/recall; adding available merged-touch gap context improves it again to 0.682/0.714 on 35 clean reset rows, but still fails the 0.90/0.90 gate.
+   - A separate model-only touch-stream exporter generated 44 unreviewed model events across 7 reset/stall clips without release touch streams, raising stream coverage from 20 to 27 videos, but the full-track ablation worsened drop to 0.652/0.714 precision/recall. Keep that artifact diagnostic-only.
+   - Score-threshold diagnostics do not rescue the drop gate: best F1 is at threshold 0.35 with 0.667 precision / 0.952 recall, still far below the 0.90 precision target.
+   - The visual error sheet shows many reset labels are hidden/gap-style decisions, not obvious single-frame grounded-ball facts.
+   - Next drop attempt should use reviewed or visually corrected full rally sequence state, long no-touch gaps, ball disappearance, and post-candidate rally-reset state rather than unreviewed model-only touch context or another point-local reset classifier.
+3. Add dwell/control features for stall:
+   - Ball speed/stationary duration around candidate.
+   - Ball-on-foot proximity persistence across multiple frames.
+   - Separate stall window positives from kick impulses.
+4. Improve the label plan:
+   - Inner/outer needs at least 20 examples per class: current gap is +13 inner and +2 outer.
+   - Side needs more balanced left rows and clips where left/right alternates cleanly.
+   - Contact type needs +13 stall, +20 knee, and +20 drop_floor reviewed examples before full kick/knee/stall/drop release scope.
+   - Ambiguous side/surface should stay unknown; noisy labels will hurt more than missing labels.
+5. HUD promotion:
+   - Keep v0.1 HUD generic for touches.
+   - Render side/surface/knee/stall/drop badges only behind gate-passed model outputs or explicit visual overrides.
+
+## Current Definition Of Done For v1.0
+
+- Contact crop embedding model exists and is evaluated clip-disjoint.
+- Side accuracy >=85% on held-out clips.
+- Surface accuracy >=85% on held-out clips.
+- Stall/drop have separate reviewed labels and pass their gates.
+- HUD badges render only for promoted signals.
+- Reports show promoted and not-promoted signals separately.
+- Tests pass and artifacts include visual audit sheets for remaining misses.
